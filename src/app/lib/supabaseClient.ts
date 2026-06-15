@@ -1,12 +1,21 @@
 import { createClient } from "@supabase/supabase-js";
-import { assertSupabaseConfig, supabaseAnonKey, supabaseProjectUrl } from "./supabaseConfig";
+import { isSupabaseConfigured, supabaseAnonKey, supabaseProjectUrl } from "./supabaseConfig";
 
-assertSupabaseConfig();
-
-export const supabase = createClient(supabaseProjectUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
+export const supabase = createClient(
+  supabaseProjectUrl || "https://placeholder.supabase.co",
+  supabaseAnonKey || "placeholder",
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
   },
-});
+);
+
+export function requireSupabase() {
+  if (!isSupabaseConfigured()) {
+    throw new Error("Supabase is not configured for this deployment.");
+  }
+  return supabase;
+}

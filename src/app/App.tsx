@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { AuthProvider, useAuth } from "./lib/AuthContext";
 import { AppProvider, useApp } from "./context/AppContext";
 import { appearanceFromProfile } from "./lib/analysisAdapter";
+import { getSupabaseConfigError, isSupabaseConfigured } from "./lib/supabaseConfig";
 import { OnboardingScreen } from "./components/OnboardingScreen";
 import { HomeScreen } from "./components/HomeScreen";
 import { WardrobeScreen } from "./components/WardrobeScreen";
@@ -121,6 +122,24 @@ function AppInner() {
 }
 
 export default function App() {
+  if (!isSupabaseConfigured()) {
+    return (
+      <div
+        className="flex items-center justify-center p-6 text-center"
+        style={{ minHeight: "100dvh", background: "var(--background)", color: "var(--foreground)" }}
+      >
+        <div style={{ maxWidth: 420 }}>
+          <h1 style={{ fontFamily: "var(--font-display)", fontSize: "1.5rem", marginBottom: 12 }}>
+            Fitz needs configuration
+          </h1>
+          <p style={{ fontFamily: "var(--font-body)", lineHeight: 1.5, color: "var(--muted-foreground)" }}>
+            {getSupabaseConfigError()}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <AuthProvider>
       <AppProvider>

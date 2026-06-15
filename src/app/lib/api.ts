@@ -1,9 +1,13 @@
-import { assertSupabaseConfig, supabaseAnonKey, supabaseProjectUrl } from "./supabaseConfig";
+import { isSupabaseConfigured, supabaseAnonKey, supabaseProjectUrl } from "./supabaseConfig";
 
-assertSupabaseConfig();
-const BASE = `${supabaseProjectUrl}/functions/v1/make-server-09284421`;
+const BASE = isSupabaseConfigured()
+  ? `${supabaseProjectUrl}/functions/v1/make-server-09284421`
+  : "";
 
 async function request(path: string, options: RequestInit = {}, token?: string | null) {
+  if (!BASE) {
+    throw new Error("Supabase is not configured for this deployment.");
+  }
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "Authorization": `Bearer ${token ?? supabaseAnonKey}`,

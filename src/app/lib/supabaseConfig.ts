@@ -16,10 +16,17 @@ export const supabaseAnonKey =
 
 export const supabaseProjectUrl = supabaseUrl;
 
+export function isSupabaseConfigured() {
+  return Boolean(supabaseProjectUrl && supabaseAnonKey);
+}
+
+export function getSupabaseConfigError() {
+  if (isSupabaseConfigured()) return null;
+  return "Missing VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (or VITE_SUPABASE_PUBLISHABLE_KEY). Add them to your environment and redeploy.";
+}
+
+/** @deprecated Use isSupabaseConfigured() — does not throw. */
 export function assertSupabaseConfig() {
-  if (!supabaseProjectUrl || !supabaseAnonKey) {
-    throw new Error(
-      "Missing VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (or VITE_SUPABASE_PUBLISHABLE_KEY) in .env",
-    );
-  }
+  const error = getSupabaseConfigError();
+  if (error) throw new Error(error);
 }
