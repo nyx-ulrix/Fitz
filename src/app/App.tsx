@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Home, Shirt, Users, ShoppingBag, Sparkles } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { AuthProvider, useAuth } from "./lib/AuthContext";
+import { AppProvider, useApp } from "./context/AppContext";
+import { appearanceFromProfile } from "./lib/analysisAdapter";
 import { OnboardingScreen } from "./components/OnboardingScreen";
 import { HomeScreen } from "./components/HomeScreen";
 import { WardrobeScreen } from "./components/WardrobeScreen";
@@ -23,8 +25,16 @@ const RIGHT_NAV: { id: Screen; icon: typeof Home; label: string }[] = [
 
 function AppInner() {
   const { token, profile, loading, signOut } = useAuth();
+  const { setPhotoDataUrl, setAppearanceAnalysis } = useApp();
   const [activeScreen, setActiveScreen] = useState<Screen>("home");
   const navigate = (screen: string) => setActiveScreen(screen as Screen);
+
+  useEffect(() => {
+    if (!profile) return;
+    if (profile.photoUrl) setPhotoDataUrl(profile.photoUrl);
+    const analysis = appearanceFromProfile(profile);
+    if (analysis) setAppearanceAnalysis(analysis);
+  }, [profile, setPhotoDataUrl, setAppearanceAnalysis]);
 
   if (loading) {
     return (
@@ -113,7 +123,9 @@ function AppInner() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppInner />
+      <AppProvider>
+        <AppInner />
+      </AppProvider>
     </AuthProvider>
   );
 }

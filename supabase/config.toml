@@ -1,0 +1,25 @@
+# Fitz — Supabase local/CLI config
+project_id = "aparlrlekvlgturuoxyl"
+
+[auth]
+site_url = "http://localhost:5173"
+additional_redirect_urls = [
+  "http://localhost:5173",
+  "https://localhost:5173",
+]
+
+[auth.external.google]
+enabled = true
+client_id = "env(GOOGLE_CLIENT_ID)"
+secret = "env(GOOGLE_CLIENT_SECRET)"
+skip_nonce_check = false
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[functions.make-server-09284421]
+verify_jwt = false

@@ -1,54 +1,9 @@
-import { useState } from "react";
-import { Sparkles, Wand2, RefreshCw, Heart, Share2, ShoppingBag, X } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Sparkles, Wand2, RefreshCw, Heart, Share2, ShoppingBag, X, ImageIcon } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-
-const GENERATED_OUTFITS = [
-  {
-    id: 1,
-    name: "Effortless Tailoring",
-    vibe: "Business Casual",
-    items: [
-      { name: "Cream Blazer", brand: "Arket", owned: true, img: "https://images.unsplash.com/photo-1525507119028-ed4c629a60a3?w=120&h=150&fit=crop&auto=format" },
-      { name: "Wide-Leg Trousers", brand: "COS", owned: true, img: "https://images.unsplash.com/photo-1516762689617-e1cffcef479d?w=120&h=150&fit=crop&auto=format" },
-      { name: "White Sneakers", brand: "Common Projects", owned: true, img: "https://images.unsplash.com/photo-1544441893-675973e31985?w=120&h=150&fit=crop&auto=format" },
-    ],
-    previewImg: "https://images.unsplash.com/photo-1467043237213-65f2da53396f?w=500&h=640&fit=crop&auto=format",
-    weather: "18°C Partly Cloudy",
-    event: "Team Presentation",
-    score: 97,
-    liked: false,
-  },
-  {
-    id: 2,
-    name: "Sunday Softness",
-    vibe: "Casual",
-    items: [
-      { name: "Linen Shirt", brand: "Uniqlo", owned: true, img: "https://images.unsplash.com/photo-1467043237213-65f2da53396f?w=120&h=150&fit=crop&auto=format" },
-      { name: "Mom Jeans", brand: "Agolde", owned: true, img: "https://images.unsplash.com/photo-1652473291442-7a2e034a00d1?w=120&h=150&fit=crop&auto=format" },
-      { name: "White Sneakers", brand: "Common Projects", owned: true, img: "https://images.unsplash.com/photo-1544441893-675973e31985?w=120&h=150&fit=crop&auto=format" },
-    ],
-    previewImg: "https://images.unsplash.com/photo-1616639943825-e0fbad20a3d3?w=500&h=640&fit=crop&auto=format",
-    weather: "22°C Sunny",
-    event: "Brunch",
-    score: 94,
-    liked: true,
-  },
-  {
-    id: 3,
-    name: "Evening Silk",
-    vibe: "Evening",
-    items: [
-      { name: "Silk Slip Dress", brand: "Reformation", owned: true, img: "https://images.unsplash.com/photo-1616639943825-e0fbad20a3d3?w=120&h=150&fit=crop&auto=format" },
-      { name: "Leather Boots", brand: "Totême", owned: true, img: "https://images.unsplash.com/photo-1479064555552-3ef4979f8908?w=120&h=150&fit=crop&auto=format" },
-      { name: "Mini Bag", brand: "Bottega", owned: false, price: 180, img: "https://images.unsplash.com/photo-1556905055-8f358a7a47b2?w=120&h=150&fit=crop&auto=format" },
-    ],
-    previewImg: "https://images.unsplash.com/photo-1581841064838-a470c740e8ee?w=500&h=640&fit=crop&auto=format",
-    weather: "16°C Clear",
-    event: "Dinner",
-    score: 91,
-    liked: false,
-  },
-];
+import { useOutfitGeneration } from "../hooks/useOutfitGeneration";
+import { useApp } from "../context/AppContext";
+import { outfitToDisplay, type DisplayOutfit } from "../lib/outfitDisplay";
 
 const PROMPT_SUGGESTIONS = [
   "Y2K aesthetic with blue jeans",
@@ -58,21 +13,42 @@ const PROMPT_SUGGESTIONS = [
 ];
 
 export function OutfitGeneratorScreen() {
+  const { weather, photoDataUrl } = useApp();
+  const {
+    outfits: apiOutfits,
+    generating,
+    error,
+    generate,
+    visualizeOutfit,
+    tryOnImages,
+    tryOnLoading,
+  } = useOutfitGeneration();
+
   const [prompt, setPrompt] = useState("");
-  const [generating, setGenerating] = useState(false);
-  const [outfits, setOutfits] = useState(GENERATED_OUTFITS);
-  const [selectedOutfit, setSelectedOutfit] = useState<typeof GENERATED_OUTFITS[0] | null>(null);
+  const [selectedOutfit, setSelectedOutfit] = useState<DisplayOutfit | null>(null);
   const [shopToggle, setShopToggle] = useState(false);
   const [budget, setBudget] = useState("150");
   const [showBudgetInput, setShowBudgetInput] = useState(false);
+  const [liked, setLiked] = useState<number[]>([]);
 
-  const handleGenerate = () => {
-    setGenerating(true);
-    setTimeout(() => setGenerating(false), 2000);
+  const outfits = useMemo(
+    () => apiOutfits.map((o, i) => outfitToDisplay(o, i, tryOnImages[i])),
+    [apiOutfits, tryOnImages],
+  );
+
+  const handleGenerate = async () => {
+    await generate({
+      occasion: prompt.trim() || "Everyday",
+      stylePreference: prompt.trim() || "Clean casual",
+      shopTheLook: shopToggle,
+      budget: Number(budget) || 0,
+    });
   };
 
   const toggleLike = (id: number) => {
-    setOutfits((prev) => prev.map((o) => o.id === id ? { ...o, liked: !o.liked } : o));
+    setLiked((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id],
+    );
   };
 
   return (
@@ -115,7 +91,7 @@ export function OutfitGeneratorScreen() {
               ))}
             </div>
             <button
-              onClick={handleGenerate}
+              onClick={() => void handleGenerate()}
               disabled={generating}
               className="flex items-center gap-2 px-5 py-2 rounded-full text-sm transition-all"
               style={{
@@ -218,12 +194,16 @@ export function OutfitGeneratorScreen() {
           <button
             className="text-xs px-3 py-1 rounded-full flex items-center gap-1"
             style={{ background: "var(--card)", color: "var(--muted-foreground)", fontFamily: "var(--font-body)", border: "1px solid var(--border)" }}
-            onClick={handleGenerate}
+            onClick={() => void handleGenerate()}
           >
             <RefreshCw size={11} />
             More
           </button>
         </div>
+
+        {error && (
+          <p className="px-5 text-xs mb-2" style={{ color: "#e85d87", fontFamily: "var(--font-body)" }}>{error}</p>
+        )}
 
         <div className="flex flex-col gap-4">
           {outfits.map((outfit, i) => (
@@ -242,7 +222,7 @@ export function OutfitGeneratorScreen() {
             >
               <div className="flex">
                 <div className="relative flex-shrink-0" style={{ width: 140, height: 180 }}>
-                  <img src={outfit.previewImg} alt={outfit.name} className="w-full h-full object-cover" />
+                  <img src={outfit.img} alt={outfit.name} className="w-full h-full object-cover" />
                   <div
                     className="absolute inset-0"
                     style={{ background: "linear-gradient(to right, transparent 70%, var(--card))" }}
@@ -265,19 +245,19 @@ export function OutfitGeneratorScreen() {
                       <button onClick={(e) => { e.stopPropagation(); toggleLike(outfit.id); }}>
                         <Heart
                           size={18}
-                          style={{ color: outfit.liked ? "#e85d87" : "var(--muted-foreground)" }}
-                          fill={outfit.liked ? "#e85d87" : "none"}
+                          style={{ color: liked.includes(outfit.id) ? "#e85d87" : "var(--muted-foreground)" }}
+                          fill={liked.includes(outfit.id) ? "#e85d87" : "none"}
                         />
                       </button>
                     </div>
                     <p className="text-xs mt-1" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>
-                      {outfit.event} · {outfit.weather}
+                      {weather?.temperature ?? "—"} · {prompt.trim() || "Everyday"}
                     </p>
                   </div>
 
                   <div>
                     <div className="flex gap-1 mt-2">
-                      {outfit.items.map((item) => (
+                      {outfit.garmentItems.map((item) => (
                         <div
                           key={item.name}
                           className="w-9 h-9 rounded-xl overflow-hidden"
@@ -287,12 +267,25 @@ export function OutfitGeneratorScreen() {
                         </div>
                       ))}
                     </div>
-                    <div className="flex items-center justify-between mt-2">
+                    <div className="flex items-center justify-between mt-2 gap-2">
                       <p className="text-xs" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>
-                        {outfit.items.filter(i => !i.owned).length > 0
-                          ? `${outfit.items.filter(i => !i.owned).length} item to buy`
+                        {outfit.shopCount > 0
+                          ? `${outfit.shopCount} item${outfit.shopCount > 1 ? "s" : ""} to buy`
                           : "All from your wardrobe"}
                       </p>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void visualizeOutfit(outfit.raw, i);
+                        }}
+                        disabled={tryOnLoading === i || !photoDataUrl}
+                        className="text-xs px-2 py-1 rounded-full flex items-center gap-1"
+                        style={{ background: "var(--secondary)", color: "var(--foreground)", fontFamily: "var(--font-body)" }}
+                      >
+                        <ImageIcon size={10} />
+                        {tryOnLoading === i ? "…" : "Try on"}
+                      </button>
                       <div
                         className="text-xs px-2 py-0.5 rounded-full"
                         style={{ background: "var(--accent)", color: "white", fontFamily: "var(--font-body)", fontWeight: 600 }}
@@ -330,7 +323,7 @@ export function OutfitGeneratorScreen() {
             >
               <div className="relative">
                 <img
-                  src={selectedOutfit.previewImg}
+                  src={selectedOutfit.img}
                   alt={selectedOutfit.name}
                   className="w-full object-cover"
                   style={{ height: 300 }}
@@ -361,12 +354,12 @@ export function OutfitGeneratorScreen() {
 
               <div className="px-5 pb-8 pt-2">
                 <p className="text-sm mb-4" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>
-                  {selectedOutfit.event} · {selectedOutfit.weather}
+                  {selectedOutfit.reason ?? `${weather?.temperature ?? "—"} · ${prompt.trim() || "Everyday"}`}
                 </p>
 
                 <h3 className="mb-3" style={{ fontFamily: "var(--font-display)", fontSize: "1rem", color: "var(--foreground)" }}>Pieces</h3>
                 <div className="flex flex-col gap-3 mb-6">
-                  {selectedOutfit.items.map((item) => (
+                  {selectedOutfit.garmentItems.map((item) => (
                     <div
                       key={item.name}
                       className="flex items-center gap-3 p-3 rounded-2xl"
@@ -377,7 +370,9 @@ export function OutfitGeneratorScreen() {
                       </div>
                       <div className="flex-1">
                         <p className="text-sm" style={{ fontFamily: "var(--font-body)", fontWeight: 600, color: "var(--foreground)" }}>{item.name}</p>
-                        <p className="text-xs" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>{item.brand}</p>
+                        <p className="text-xs" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>
+                          {item.owned ? "Your wardrobe" : "Shop item"}
+                        </p>
                       </div>
                       {item.owned ? (
                         <span className="text-xs px-2 py-1 rounded-full" style={{ background: "var(--secondary)", color: "var(--foreground)", fontFamily: "var(--font-body)" }}>

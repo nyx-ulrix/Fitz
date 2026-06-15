@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { ProductDetailScreen } from "./ProductDetailScreen";
 import { useAuth } from "../lib/AuthContext";
 import { api } from "../lib/api";
+import { fetchShop } from "../lib/fitzApi";
 
 const USER_PROFILE = {
   name: "Sophie",
@@ -105,6 +106,34 @@ export function ShopScreen() {
   const [addedId, setAddedId]           = useState<number | null>(null);
   const [checkedOut, setCheckedOut]     = useState(false);
   const [detailItem, setDetailItem]     = useState<ShopItem | null>(null);
+  const [discoverOutfits, setDiscoverOutfits] = useState(DISCOVER_OUTFITS);
+
+  useEffect(() => {
+    fetchShop()
+      .then(({ items }) => {
+        if (!items?.length) return;
+        setDiscoverOutfits([
+          {
+            id: 0,
+            name: "Marketplace catalog",
+            reason: "Loaded from Supabase marketplace_items",
+            img: items[0].image_url,
+            tags: ["Shop the look"],
+            items: items.map((item, index) => ({
+              id: 9000 + index,
+              name: item.name,
+              brand: item.category ?? "Shop",
+              price: Number(item.price),
+              sale: false,
+              img: item.image_url,
+              rating: 4.5,
+              outfitId: 0,
+            })),
+          },
+        ]);
+      })
+      .catch(() => {});
+  }, []);
 
   // Load persisted cart from Supabase on mount
   useEffect(() => {
@@ -303,7 +332,7 @@ export function ShopScreen() {
 
       {/* Outfit sections */}
       <div className="px-5 flex flex-col gap-5">
-        {DISCOVER_OUTFITS.map((outfit, oi) => (
+        {discoverOutfits.map((outfit, oi) => (
           <motion.div key={outfit.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: oi * 0.1 }}
             className="rounded-3xl overflow-hidden" style={{ background: "var(--card)", border: "1.5px solid var(--border)", boxShadow: "0 4px 16px rgba(169,139,227,0.1)" }}>
             {/* Hero */}

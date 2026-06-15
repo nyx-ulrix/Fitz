@@ -1,8 +1,14 @@
-import { useState } from "react";
-import { ArrowLeft, Camera, ImagePlus, Mail, Sparkles, Check, ChevronDown, X } from "lucide-react";
+import { useState, useRef } from "react";
+import { ArrowLeft, Camera, ImagePlus, Mail, Sparkles, Check, ChevronDown, X, Images, AlertCircle } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useAuth } from "../lib/AuthContext";
 import { api } from "../lib/api";
+import { readImage } from "../lib/images";
+import {
+  nameFromFile,
+  uploadGarmentImage,
+  validateGarmentImage,
+} from "../lib/wardrobeStorage";
 
 const CATEGORIES = ["Tops", "Bottoms", "Dresses", "Shoes", "Accessories", "Outerwear", "Bags"];
 const SEASONS    = ["All seasons", "Spring / Summer", "Autumn / Winter"];
@@ -25,7 +31,14 @@ const COLOURS    = [
   { name: "Orange", hex: "#e07b39" },
 ];
 
-type Method = "photo" | "receipt" | "manual" | null;
+type Method = "photo" | "bulk" | "receipt" | "manual" | null;
+
+interface BulkItem {
+  id: string;
+  file: File;
+  preview: string;
+  name: string;
+}
 
 interface ItemForm {
   name: string;
@@ -46,46 +59,133 @@ export function AddItemScreen({ onBack }: AddItemScreenProps) {
   const [form, setForm] = useState<ItemForm>({
     name: "", brand: "", category: "", colour: "", season: "", price: "", notes: "",
   });
-  const { token } = useAuth();
+  const { token, profile } = useAuth();
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const bulkInputRef = useRef<HTMLInputElement>(null);
+  const manualImageRef = useRef<HTMLInputElement>(null);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState("");
+  const [manualImageFile, setManualImageFile] = useState<File | null>(null);
+  const [manualImagePreview, setManualImagePreview] = useState("");
+  const [bulkItems, setBulkItems] = useState<BulkItem[]>([]);
+  const [bulkCategory, setBulkCategory] = useState("Tops");
   const [aiTagging, setAiTagging] = useState(false);
   const [aiTagged, setAiTagged]   = useState(false);
   const [saved, setSaved]         = useState(false);
+  const [saving, setSaving]         = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [showSeasonPicker, setShowSeasonPicker]     = useState(false);
+  const [showBulkCategoryPicker, setShowBulkCategoryPicker] = useState(false);
 
-  const simulateAiTag = () => {
+  const addFilesToBulk = async (files: FileList | File[]) => {
+    const list = Array.from(files);
+    const next: BulkItem[] = [];
+    for (const file of list) {
+      const validationError = validateGarmentImage(file);
+      if (validationError) {
+        setSaveError(validationError);
+        continue;
+      }
+      const preview = await readImage(file);
+      next.push({
+        id: crypto.randomUUID(),
+        file,
+        preview,
+        name: nameFromFile(file) || "Wardrobe item",
+      });
+    }
+    if (next.length) {
+      setSaveError("");
+      setBulkItems((current) => [...current, ...next]);
+    }
+  };
+
+  const handlePhotoFile = async (file?: File) => {
+    if (!file) return;
+    const validationError = validateGarmentImage(file);
+    if (validationError) {
+      setSaveError(validationError);
+      return;
+    }
+    setSaveError("");
+    setPhotoFile(file);
+    setPhotoPreview(await readImage(file));
     setAiTagging(true);
+    setAiTagged(false);
     setTimeout(() => {
       setForm((f) => ({
         ...f,
-        name:     "Oversized Blazer",
-        brand:    "Arket",
-        category: "Tops",
-        colour:   "Cream",
-        season:   "All seasons",
-        price:    "189",
+        name: nameFromFile(file) || f.name || "Wardrobe item",
+        brand: f.brand,
+        category: f.category || "Tops",
+        colour: f.colour,
+        season: f.season || "All seasons",
+        price: f.price,
       }));
       setAiTagging(false);
       setAiTagged(true);
-    }, 2000);
+    }, 800);
   };
 
+  const buildWardrobePayload = (imageUrl?: string) => ({
+    name: form.name,
+    brand: form.brand,
+    category: form.category.toLowerCase(),
+    colour: form.colour,
+    season: form.season,
+    price: parseFloat(form.price) || 0,
+    notes: form.notes,
+    ...(imageUrl
+      ? { image_url: imageUrl, img: imageUrl }
+      : {}),
+  });
+
   const handleSave = async () => {
-    if (!token) return;
+    if (!token || !profile?.id) return;
+    setSaving(true);
+    setSaveError("");
     try {
-      await api.addWardrobeItem(token, {
-        name:     form.name,
-        brand:    form.brand,
-        category: form.category.toLowerCase(),
-        colour:   form.colour,
-        season:   form.season,
-        price:    parseFloat(form.price) || 0,
-        notes:    form.notes,
-      });
+      let imageUrl: string | undefined;
+      const imageFile = method === "photo" ? photoFile : manualImageFile;
+      if (imageFile) {
+        imageUrl = await uploadGarmentImage(profile.id, imageFile);
+      }
+      await api.addWardrobeItem(token, buildWardrobePayload(imageUrl));
       setSaved(true);
       setTimeout(onBack, 1400);
     } catch (e) {
-      console.log("Save item error:", e);
+      setSaveError(e instanceof Error ? e.message : "Could not save item");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleBulkSave = async () => {
+    if (!token || !profile?.id || bulkItems.length === 0) return;
+    setSaving(true);
+    setSaveError("");
+    try {
+      for (const item of bulkItems) {
+        const imageUrl = await uploadGarmentImage(profile.id, item.file);
+        await api.addWardrobeItem(token, {
+          name: item.name.trim() || nameFromFile(item.file) || "Wardrobe item",
+          brand: "",
+          category: bulkCategory.toLowerCase(),
+          colour: "",
+          season: "All seasons",
+          price: 0,
+          notes: "",
+          image_url: imageUrl,
+          img: imageUrl,
+        });
+      }
+      setSaved(true);
+      setTimeout(onBack, 1400);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Could not save items");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -112,7 +212,7 @@ export function AddItemScreen({ onBack }: AddItemScreenProps) {
           {/* Photo upload */}
           <motion.button
             whileTap={{ scale: 0.98 }}
-            onClick={() => { setMethod("photo"); simulateAiTag(); }}
+            onClick={() => setMethod("photo")}
             className="w-full text-left rounded-3xl overflow-hidden"
             style={{ background: "var(--card)", border: "1.5px solid var(--border)", boxShadow: "0 4px 16px rgba(169,139,227,0.12)" }}
           >
@@ -134,6 +234,31 @@ export function AddItemScreen({ onBack }: AddItemScreenProps) {
               </div>
               <p className="text-xs" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)", lineHeight: 1.5 }}>
                 Take a photo or upload from your camera roll. AI automatically removes the background, tags the colour, category, and brand.
+              </p>
+            </div>
+          </motion.button>
+
+          {/* Multiple photos */}
+          <motion.button
+            whileTap={{ scale: 0.98 }}
+            onClick={() => setMethod("bulk")}
+            className="w-full text-left rounded-3xl overflow-hidden"
+            style={{ background: "var(--card)", border: "1.5px solid var(--border)", boxShadow: "0 4px 16px rgba(169,139,227,0.12)" }}
+          >
+            <div
+              className="relative flex items-center justify-center"
+              style={{ height: 140, background: "linear-gradient(135deg, var(--muted), var(--secondary))" }}
+            >
+              <div className="flex flex-col items-center gap-2">
+                <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: "rgba(255,255,255,0.5)" }}>
+                  <Images size={26} style={{ color: "var(--foreground)" }} />
+                </div>
+                <span className="text-sm" style={{ fontFamily: "var(--font-body)", fontWeight: 600, color: "var(--foreground)" }}>Upload Multiple Photos</span>
+              </div>
+            </div>
+            <div className="p-4">
+              <p className="text-xs" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)", lineHeight: 1.5 }}>
+                Select several clothing photos at once. Each image becomes its own wardrobe item.
               </p>
             </div>
           </motion.button>
@@ -248,6 +373,155 @@ export function AddItemScreen({ onBack }: AddItemScreenProps) {
     );
   }
 
+  // ── BULK UPLOAD ────────────────────────────────────────────
+  if (method === "bulk") {
+    return (
+      <div className="flex flex-col pb-8">
+        <div className="px-5 pt-6 pb-4 flex items-center gap-3">
+          <button onClick={() => setMethod(null)} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+            <ArrowLeft size={17} style={{ color: "var(--foreground)" }} />
+          </button>
+          <h1 style={{ fontFamily: "var(--font-display)", fontSize: "1.5rem", fontWeight: 700, color: "var(--foreground)" }}>
+            Upload Multiple
+          </h1>
+        </div>
+
+        <div className="px-5 flex flex-col gap-4">
+          <input
+            ref={bulkInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              void addFilesToBulk(e.target.files ?? []);
+              e.target.value = "";
+            }}
+          />
+
+          <button
+            onClick={() => bulkInputRef.current?.click()}
+            className="w-full py-4 rounded-2xl flex items-center justify-center gap-2 text-sm"
+            style={{ background: "linear-gradient(135deg, var(--accent), #7e5fbf)", color: "white", fontFamily: "var(--font-body)", fontWeight: 700 }}
+          >
+            <Images size={18} /> Choose Photos
+          </button>
+
+          <button
+            className="rounded-2xl p-4 flex items-center justify-between text-left w-full"
+            style={{ background: "var(--card)", border: "1.5px solid var(--border)" }}
+            onClick={() => setShowBulkCategoryPicker(true)}
+          >
+            <div>
+              <p className="text-xs mb-1" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Category for all items
+              </p>
+              <p className="text-sm" style={{ color: "var(--foreground)", fontFamily: "var(--font-body)" }}>{bulkCategory}</p>
+            </div>
+            <ChevronDown size={16} style={{ color: "var(--muted-foreground)" }} />
+          </button>
+
+          {bulkItems.length > 0 && (
+            <div className="grid grid-cols-2 gap-3">
+              {bulkItems.map((item) => (
+                <div key={item.id} className="rounded-2xl overflow-hidden" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+                  <div className="relative" style={{ height: 120 }}>
+                    <img src={item.preview} alt={item.name} className="w-full h-full object-cover" />
+                    <button
+                      onClick={() => setBulkItems((current) => current.filter((entry) => entry.id !== item.id))}
+                      className="absolute top-2 right-2 w-7 h-7 rounded-full flex items-center justify-center"
+                      style={{ background: "rgba(255,255,255,0.9)" }}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                  <div className="p-3">
+                    <input
+                      type="text"
+                      value={item.name}
+                      onChange={(e) =>
+                        setBulkItems((current) =>
+                          current.map((entry) =>
+                            entry.id === item.id ? { ...entry, name: e.target.value } : entry,
+                          ),
+                        )
+                      }
+                      className="w-full bg-transparent outline-none text-xs"
+                      style={{ color: "var(--foreground)", fontFamily: "var(--font-body)", fontWeight: 600 }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {saveError && (
+            <div className="flex items-start gap-2 px-4 py-3 rounded-xl" style={{ background: "rgba(232,93,135,0.1)", border: "1px solid rgba(232,93,135,0.3)" }}>
+              <AlertCircle size={16} style={{ color: "#e85d87", flexShrink: 0, marginTop: 1 }} />
+              <p className="text-xs" style={{ color: "#e85d87", fontFamily: "var(--font-body)" }}>{saveError}</p>
+            </div>
+          )}
+
+          {saved ? (
+            <div className="w-full py-4 rounded-full flex items-center justify-center gap-2" style={{ background: "#dcfce7" }}>
+              <Check size={18} style={{ color: "#16a34a" }} />
+              <span style={{ fontFamily: "var(--font-body)", fontWeight: 600, color: "#16a34a" }}>Added to wardrobe!</span>
+            </div>
+          ) : (
+            <button
+              onClick={() => void handleBulkSave()}
+              disabled={bulkItems.length === 0 || saving}
+              className="w-full py-4 rounded-full text-sm"
+              style={{
+                background: bulkItems.length > 0 && !saving ? "linear-gradient(135deg, var(--accent), #7e5fbf)" : "var(--muted)",
+                color: bulkItems.length > 0 && !saving ? "white" : "var(--muted-foreground)",
+                fontFamily: "var(--font-body)", fontWeight: 700,
+              }}
+            >
+              {saving ? "Uploading…" : `Add ${bulkItems.length} item${bulkItems.length === 1 ? "" : "s"} to wardrobe`}
+            </button>
+          )}
+        </div>
+
+        <AnimatePresence>
+          {showBulkCategoryPicker && (
+            <>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="fixed inset-0 z-30" style={{ background: "rgba(75,59,97,0.4)", backdropFilter: "blur(4px)" }}
+                onClick={() => setShowBulkCategoryPicker(false)}
+              />
+              <motion.div initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+                transition={{ type: "spring", damping: 26, stiffness: 300 }}
+                className="fixed bottom-0 left-0 right-0 z-40 rounded-t-3xl p-5"
+                style={{ background: "var(--card)" }}
+              >
+                <div className="w-10 h-1 rounded-full mx-auto mb-4" style={{ background: "var(--border)" }} />
+                <div className="flex flex-col gap-2">
+                  {CATEGORIES.map((cat) => (
+                    <button
+                      key={cat}
+                      onClick={() => { setBulkCategory(cat); setShowBulkCategoryPicker(false); }}
+                      className="flex items-center justify-between px-4 py-3.5 rounded-2xl text-sm"
+                      style={{
+                        background: bulkCategory === cat ? "var(--primary)" : "var(--background)",
+                        color: bulkCategory === cat ? "var(--primary-foreground)" : "var(--foreground)",
+                        fontFamily: "var(--font-body)",
+                        border: "1px solid var(--border)",
+                      }}
+                    >
+                      {cat}
+                      {bulkCategory === cat && <Check size={15} />}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  }
+
   // ── PHOTO / MANUAL FORM ────────────────────────────────────
   return (
     <div className="flex flex-col pb-8">
@@ -265,10 +539,20 @@ export function AddItemScreen({ onBack }: AddItemScreenProps) {
 
         {/* Photo upload zone */}
         {method === "photo" && (
-          <div
-            className="relative flex items-center justify-center rounded-3xl overflow-hidden"
-            style={{ height: 200, background: "var(--card)", border: "2px dashed var(--accent)" }}
-          >
+          <>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={(e) => void handlePhotoFile(e.target.files?.[0])}
+            />
+            <button
+              type="button"
+              onClick={() => photoInputRef.current?.click()}
+              className="relative flex items-center justify-center rounded-3xl overflow-hidden w-full"
+              style={{ height: 200, background: "var(--card)", border: "2px dashed var(--accent)" }}
+            >
             {aiTagging ? (
               <motion.div
                 initial={{ opacity: 0 }} animate={{ opacity: 1 }}
@@ -280,13 +564,15 @@ export function AddItemScreen({ onBack }: AddItemScreenProps) {
                 <p className="text-sm" style={{ fontFamily: "var(--font-body)", color: "var(--muted-foreground)" }}>AI analysing photo…</p>
                 <p className="text-xs" style={{ fontFamily: "var(--font-body)", color: "var(--muted-foreground)" }}>Removing background · Tagging details</p>
               </motion.div>
-            ) : aiTagged ? (
-              <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col items-center gap-2">
-                <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: "var(--accent)" }}>
-                  <Check size={22} color="white" />
+            ) : aiTagged && photoPreview ? (
+              <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="w-full h-full relative">
+                <img src={photoPreview} alt="Selected garment" className="w-full h-full object-cover" />
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2" style={{ background: "rgba(75,59,97,0.35)" }}>
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: "var(--accent)" }}>
+                    <Check size={22} color="white" />
+                  </div>
+                  <p className="text-sm text-white" style={{ fontFamily: "var(--font-body)", fontWeight: 600 }}>Photo selected</p>
                 </div>
-                <p className="text-sm" style={{ fontFamily: "var(--font-body)", fontWeight: 600, color: "var(--foreground)" }}>Photo analysed!</p>
-                <p className="text-xs" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>Details filled in below — review & save</p>
               </motion.div>
             ) : (
               <div className="flex flex-col items-center gap-3">
@@ -296,7 +582,46 @@ export function AddItemScreen({ onBack }: AddItemScreenProps) {
                 <p className="text-sm" style={{ fontFamily: "var(--font-body)", color: "var(--muted-foreground)" }}>Tap to take or upload a photo</p>
               </div>
             )}
-          </div>
+            </button>
+          </>
+        )}
+
+        {method === "manual" && (
+          <>
+            <input
+              ref={manualImageRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const validationError = validateGarmentImage(file);
+                if (validationError) {
+                  setSaveError(validationError);
+                  return;
+                }
+                setSaveError("");
+                setManualImageFile(file);
+                void readImage(file).then(setManualImagePreview);
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => manualImageRef.current?.click()}
+              className="relative flex items-center justify-center rounded-3xl overflow-hidden w-full"
+              style={{ height: 160, background: "var(--card)", border: "2px dashed var(--border)" }}
+            >
+              {manualImagePreview ? (
+                <img src={manualImagePreview} alt="Item" className="w-full h-full object-cover" />
+              ) : (
+                <div className="flex flex-col items-center gap-2">
+                  <ImagePlus size={24} style={{ color: "var(--muted-foreground)" }} />
+                  <p className="text-sm" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>Add a photo (optional)</p>
+                </div>
+              )}
+            </button>
+          </>
         )}
 
         {/* AI tag banner */}
@@ -442,6 +767,13 @@ export function AddItemScreen({ onBack }: AddItemScreenProps) {
           </div>
         </div>
 
+        {saveError && (
+          <div className="flex items-start gap-2 px-4 py-3 rounded-xl" style={{ background: "rgba(232,93,135,0.1)", border: "1px solid rgba(232,93,135,0.3)" }}>
+            <AlertCircle size={16} style={{ color: "#e85d87", flexShrink: 0, marginTop: 1 }} />
+            <p className="text-xs" style={{ color: "#e85d87", fontFamily: "var(--font-body)" }}>{saveError}</p>
+          </div>
+        )}
+
         {/* Save button */}
         <AnimatePresence mode="wait">
           {saved ? (
@@ -457,17 +789,17 @@ export function AddItemScreen({ onBack }: AddItemScreenProps) {
           ) : (
             <motion.button
               key="save"
-              onClick={handleSave}
-              disabled={!canSave}
+              onClick={() => void handleSave()}
+              disabled={!canSave || saving}
               className="w-full py-4 rounded-full text-sm transition-all"
               style={{
-                background: canSave ? "linear-gradient(135deg, var(--accent), #7e5fbf)" : "var(--muted)",
-                color: canSave ? "white" : "var(--muted-foreground)",
+                background: canSave && !saving ? "linear-gradient(135deg, var(--accent), #7e5fbf)" : "var(--muted)",
+                color: canSave && !saving ? "white" : "var(--muted-foreground)",
                 fontFamily: "var(--font-body)", fontWeight: 700,
-                boxShadow: canSave ? "0 6px 20px rgba(169,139,227,0.4)" : "none",
+                boxShadow: canSave && !saving ? "0 6px 20px rgba(169,139,227,0.4)" : "none",
               }}
             >
-              Save to Wardrobe
+              {saving ? "Saving…" : "Save to Wardrobe"}
             </motion.button>
           )}
         </AnimatePresence>

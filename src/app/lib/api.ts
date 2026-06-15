@@ -1,11 +1,12 @@
-import { projectId, publicAnonKey } from "/utils/supabase/info";
+import { assertSupabaseConfig, supabaseAnonKey, supabaseProjectUrl } from "./supabaseConfig";
 
-const BASE = `https://${projectId}.supabase.co/functions/v1/make-server-09284421`;
+assertSupabaseConfig();
+const BASE = `${supabaseProjectUrl}/functions/v1/make-server-09284421`;
 
 async function request(path: string, options: RequestInit = {}, token?: string | null) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    "Authorization": `Bearer ${token ?? publicAnonKey}`,
+    "Authorization": `Bearer ${token ?? supabaseAnonKey}`,
     ...(options.headers as Record<string, string> ?? {}),
   };
   const res = await fetch(`${BASE}${path}`, { ...options, headers });
@@ -21,6 +22,9 @@ export const api = {
 
   signin: (email: string, password: string) =>
     request("/auth/signin", { method: "POST", body: JSON.stringify({ email, password }) }),
+
+  bootstrapProfile: (token: string) =>
+    request("/auth/bootstrap", { method: "POST", body: "{}" }, token),
 
   // Profile
   getProfile: (token: string) =>
@@ -74,4 +78,17 @@ export const api = {
 
   clearCart: (token: string) =>
     request("/cart", { method: "DELETE" }, token),
+
+  uploadClothingImage: async (token: string, file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${BASE}/storage/upload`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? "Image upload failed");
+    return data as { imageUrl: string; path?: string };
+  },
 };

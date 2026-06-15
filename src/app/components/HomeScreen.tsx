@@ -1,47 +1,12 @@
-import { useState } from "react";
-import { Sun, Wind, Cloud, Wand2, Shirt, ChevronRight, RefreshCw, X, Check, Heart, Share2, Sparkles, Users, ShoppingBag } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Sun, Wind, Cloud, Wand2, Shirt, ChevronRight, RefreshCw, X, Check, Heart, Share2, Sparkles, Users, ShoppingBag, ImageIcon } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-
-const WARDROBE_ITEMS = [
-  { id: 1, name: "Cream Blazer", brand: "Arket", category: "tops", img: "https://images.unsplash.com/photo-1525507119028-ed4c629a60a3?w=200&h=260&fit=crop&auto=format" },
-  { id: 2, name: "Wide-Leg Trousers", brand: "COS", category: "bottoms", img: "https://images.unsplash.com/photo-1516762689617-e1cffcef479d?w=200&h=260&fit=crop&auto=format" },
-  { id: 3, name: "White Sneakers", brand: "Common Projects", category: "shoes", img: "https://images.unsplash.com/photo-1544441893-675973e31985?w=200&h=260&fit=crop&auto=format" },
-  { id: 4, name: "Linen Shirt", brand: "Uniqlo", category: "tops", img: "https://images.unsplash.com/photo-1467043237213-65f2da53396f?w=200&h=260&fit=crop&auto=format" },
-  { id: 5, name: "Leather Boots", brand: "Totême", category: "shoes", img: "https://images.unsplash.com/photo-1479064555552-3ef4979f8908?w=200&h=260&fit=crop&auto=format" },
-  { id: 6, name: "Silk Slip Dress", brand: "Reformation", category: "dresses", img: "https://images.unsplash.com/photo-1616639943825-e0fbad20a3d3?w=200&h=260&fit=crop&auto=format" },
-  { id: 7, name: "Chunky Knit", brand: "Zara", category: "tops", img: "https://images.unsplash.com/photo-1556905055-8f358a7a47b2?w=200&h=260&fit=crop&auto=format" },
-  { id: 8, name: "Mom Jeans", brand: "Agolde", category: "bottoms", img: "https://images.unsplash.com/photo-1652473291442-7a2e034a00d1?w=200&h=260&fit=crop&auto=format" },
-];
-
-const GENERATED_OUTFITS = [
-  {
-    id: 1,
-    name: "Effortless Tailoring",
-    vibe: "Business Casual",
-    img: "https://images.unsplash.com/photo-1467043237213-65f2da53396f?w=500&h=640&fit=crop&auto=format",
-    items: ["Cream Blazer", "Wide-Leg Trousers", "White Sneakers"],
-    score: 97,
-    liked: false,
-  },
-  {
-    id: 2,
-    name: "Sunday Softness",
-    vibe: "Casual",
-    img: "https://images.unsplash.com/photo-1616639943825-e0fbad20a3d3?w=500&h=640&fit=crop&auto=format",
-    items: ["Linen Shirt", "Mom Jeans", "White Sneakers"],
-    score: 93,
-    liked: true,
-  },
-  {
-    id: 3,
-    name: "Evening Silk",
-    vibe: "Evening",
-    img: "https://images.unsplash.com/photo-1652473291442-7a2e034a00d1?w=500&h=640&fit=crop&auto=format",
-    items: ["Silk Slip Dress", "Leather Boots"],
-    score: 91,
-    liked: false,
-  },
-];
+import { useAuth } from "../lib/AuthContext";
+import { useApp } from "../context/AppContext";
+import { useOutfitGeneration } from "../hooks/useOutfitGeneration";
+import { outfitToDisplay, type DisplayOutfit } from "../lib/outfitDisplay";
+import { fetchWardrobe } from "../lib/fitzApi";
+import type { OutfitItem } from "../lib/types";
 
 
 interface HomeScreenProps {
@@ -49,34 +14,74 @@ interface HomeScreenProps {
 }
 
 export function HomeScreen({ onNavigate }: HomeScreenProps) {
-  const [prompt, setPrompt] = useState("");
-  const [selectedItems, setSelectedItems] = useState<number[]>([]);
-  const [showWardrobePicker, setShowWardrobePicker] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [outfits, setOutfits] = useState<typeof GENERATED_OUTFITS>([]);
-  const [hasGenerated, setHasGenerated] = useState(false);
-  const [selectedOutfit, setSelectedOutfit] = useState<typeof GENERATED_OUTFITS[0] | null>(null);
-  const [likedOutfits, setLikedOutfits] = useState<number[]>([2]);
+  const { token, profile } = useAuth();
+  const { weather, weatherLoading, refreshWeather, photoDataUrl } = useApp();
+  const {
+    outfits: apiOutfits,
+    generating,
+    error,
+    generate,
+    visualizeOutfit,
+    tryOnImages,
+    tryOnLoading,
+    tryOnNotes,
+  } = useOutfitGeneration();
 
-  const toggleItem = (id: number) => {
+  const [prompt, setPrompt] = useState("");
+  const [wardrobeItems, setWardrobeItems] = useState<OutfitItem[]>([]);
+  const [selectedItems, setSelectedItems] = useState<string[]>([]);
+  const [showWardrobePicker, setShowWardrobePicker] = useState(false);
+  const [hasGenerated, setHasGenerated] = useState(false);
+  const [selectedOutfit, setSelectedOutfit] = useState<DisplayOutfit | null>(null);
+  const [likedOutfits, setLikedOutfits] = useState<number[]>([]);
+
+  const displayOutfits = useMemo(
+    () =>
+      apiOutfits.map((outfit, i) =>
+        outfitToDisplay(outfit, i, tryOnImages[i]),
+      ),
+    [apiOutfits, tryOnImages],
+  );
+
+  const todayLabel = new Date().toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+
+  const loadWardrobePicker = async () => {
+    if (!token) return;
+    try {
+      const { items } = await fetchWardrobe(token);
+      setWardrobeItems(items ?? []);
+    } catch {
+      setWardrobeItems([]);
+    }
+  };
+
+  const toggleItem = (id: string) => {
     setSelectedItems((prev) =>
-      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id],
     );
   };
 
-  const handleGenerate = () => {
-    setGenerating(true);
+  const handleGenerate = async () => {
     setHasGenerated(false);
-    setTimeout(() => {
-      setGenerating(false);
-      setHasGenerated(true);
-      setOutfits(GENERATED_OUTFITS);
-    }, 2200);
+    const mustWear = wardrobeItems
+      .filter((w) => selectedItems.includes(w.id))
+      .map((w) => w.name)
+      .join(", ");
+    await generate({
+      occasion: prompt.trim() || "Everyday",
+      stylePreference: prompt.trim() || "Clean casual",
+      mustWearItem: mustWear || undefined,
+    });
+    setHasGenerated(true);
   };
 
   const toggleLike = (id: number) => {
     setLikedOutfits((prev) =>
-      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id],
     );
   };
 
@@ -87,7 +92,7 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
         <div className="flex items-start justify-between">
           <div>
             <p className="text-xs" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              Monday, June 15
+              {todayLabel}
             </p>
             <h1 style={{ fontFamily: "var(--font-display)", color: "var(--foreground)", fontSize: "1.6rem", fontWeight: 700, lineHeight: 1.2, marginTop: 2 }}>
               What are you<br />
@@ -95,15 +100,21 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
             </h1>
           </div>
           <button
-            className="w-10 h-10 rounded-full overflow-hidden flex-shrink-0"
-            style={{ border: "2px solid var(--accent)", marginTop: 4 }}
+            className="w-10 h-10 rounded-full overflow-hidden flex-shrink-0 flex items-center justify-center"
+            style={{ border: "2px solid var(--accent)", marginTop: 4, background: "var(--accent)" }}
             onClick={() => onNavigate("profile")}
           >
-            <img
-              src="https://images.unsplash.com/photo-1581841064838-a470c740e8ee?w=80&h=80&fit=crop&auto=format"
-              alt="Profile"
-              className="w-full h-full object-cover"
-            />
+            {profile?.photoUrl ? (
+              <img
+                src={profile.photoUrl}
+                alt={profile.name ?? "Profile"}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <span style={{ fontSize: "0.95rem", color: "white", fontWeight: 700, fontFamily: "var(--font-body)" }}>
+                {profile?.name?.[0]?.toUpperCase() ?? "?"}
+              </span>
+            )}
           </button>
         </div>
       </div>
@@ -127,20 +138,26 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
                 <Sun size={20} color="white" />
               </div>
               <div>
-                <p className="text-white" style={{ fontFamily: "var(--font-display)", fontSize: "1.5rem", fontWeight: 700, lineHeight: 1 }}>22°C</p>
-                <p className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.85)", fontFamily: "var(--font-body)" }}>Partly Cloudy · London</p>
+                <p className="text-white" style={{ fontFamily: "var(--font-display)", fontSize: "1.5rem", fontWeight: 700, lineHeight: 1 }}>
+                  {weather?.temperature ?? (weatherLoading ? "…" : "—")}
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.85)", fontFamily: "var(--font-body)" }}>
+                  {weather?.description ?? "Loading weather"} · {weather?.location ?? "Singapore"}
+                </p>
               </div>
             </div>
             <div className="flex flex-col gap-1 text-right">
               <div className="flex items-center gap-1.5 justify-end">
                 <Wind size={11} color="rgba(255,255,255,0.8)" />
-                <span className="text-xs" style={{ color: "rgba(255,255,255,0.8)", fontFamily: "var(--font-body)" }}>12 km/h</span>
+                <span className="text-xs" style={{ color: "rgba(255,255,255,0.8)", fontFamily: "var(--font-body)" }}>{weather?.rainChance ?? "—"}</span>
               </div>
               <div className="flex items-center gap-1.5 justify-end">
                 <Cloud size={11} color="rgba(255,255,255,0.8)" />
-                <span className="text-xs" style={{ color: "rgba(255,255,255,0.8)", fontFamily: "var(--font-body)" }}>65% humidity</span>
+                <span className="text-xs" style={{ color: "rgba(255,255,255,0.8)", fontFamily: "var(--font-body)" }}>{weather?.humidity ?? "—"}</span>
               </div>
-              <span className="text-xs" style={{ color: "rgba(255,255,255,0.7)", fontFamily: "var(--font-body)" }}>H:25° L:16°</span>
+              <button type="button" onClick={() => void refreshWeather()} className="text-xs" style={{ color: "rgba(255,255,255,0.7)", fontFamily: "var(--font-body)" }}>
+                Refresh
+              </button>
             </div>
           </div>
           {/* Clothing advice strip */}
@@ -150,7 +167,7 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
           >
             <Sparkles size={12} color="white" style={{ flexShrink: 0 }} />
             <p className="text-xs text-white" style={{ fontFamily: "var(--font-body)", lineHeight: 1.4 }}>
-              Light layers today — a linen shirt or light knit with trousers works perfectly. Bring a jacket for the evening drop.
+              {weather?.outfitAdvice ?? "Loading clothing advice for today…"}
             </p>
           </div>
         </div>
@@ -188,7 +205,7 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
                 rows={3}
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder={`It's 22°C and partly cloudy in London today. Describe your vibe or occasion…`}
+                placeholder={weather ? `It's ${weather.temperature} in ${weather.location}. Describe your vibe or occasion…` : "Describe your vibe or occasion…"}
                 className="w-full bg-transparent outline-none text-sm resize-none"
                 style={{ color: "var(--foreground)", fontFamily: "var(--font-body)", lineHeight: 1.5 }}
               />
@@ -198,7 +215,7 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
             <div
               className="flex items-center gap-3 p-3 rounded-2xl mb-4 cursor-pointer transition-all hover:scale-[1.01]"
               style={{ background: "var(--background)", border: "1.5px solid var(--border)" }}
-              onClick={() => setShowWardrobePicker(true)}
+              onClick={() => { void loadWardrobePicker(); setShowWardrobePicker(true); }}
             >
               <div
                 className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
@@ -212,15 +229,15 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
                 </p>
                 <p className="text-xs truncate" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>
                   {selectedItems.length > 0
-                    ? WARDROBE_ITEMS.filter((w) => selectedItems.includes(w.id)).map((w) => w.name).join(", ")
+                    ? wardrobeItems.filter((w) => selectedItems.includes(w.id)).map((w) => w.name).join(", ")
                     : "Tap to pick items you want styled today"}
                 </p>
               </div>
               {selectedItems.length > 0 && (
                 <div className="flex -space-x-1.5">
-                  {WARDROBE_ITEMS.filter((w) => selectedItems.includes(w.id)).slice(0, 3).map((w) => (
+                  {wardrobeItems.filter((w) => selectedItems.includes(w.id)).slice(0, 3).map((w) => (
                     <div key={w.id} className="w-7 h-7 rounded-lg overflow-hidden flex-shrink-0" style={{ border: "1.5px solid var(--card)" }}>
-                      <img src={w.img} alt={w.name} className="w-full h-full object-cover" />
+                      <img src={w.image_url} alt={w.name} className="w-full h-full object-cover" />
                     </div>
                   ))}
                 </div>
@@ -228,9 +245,11 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
               <ChevronRight size={16} style={{ color: "var(--muted-foreground)", flexShrink: 0 }} />
             </div>
 
-            {/* Generate button */}
+            {error && (
+              <p className="text-xs mt-2" style={{ color: "#e85d87", fontFamily: "var(--font-body)" }}>{error}</p>
+            )}
             <button
-              onClick={handleGenerate}
+              onClick={() => void handleGenerate()}
               disabled={generating}
               className="w-full py-4 rounded-2xl flex items-center justify-center gap-2.5 transition-all active:scale-[0.98]"
               style={{
@@ -308,7 +327,7 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
             </div>
 
             <div className="flex flex-col gap-3">
-              {outfits.map((outfit, i) => {
+              {displayOutfits.map((outfit, i) => {
                 const liked = likedOutfits.includes(outfit.id);
                 return (
                   <motion.div
@@ -351,12 +370,28 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
                               </span>
                             ))}
                           </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>All from wardrobe</span>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>Tap to view</span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void visualizeOutfit(outfit.raw, i);
+                              }}
+                              disabled={tryOnLoading === i || !photoDataUrl}
+                              className="text-xs px-2 py-1 rounded-full flex items-center gap-1"
+                              style={{ background: "var(--secondary)", color: "var(--foreground)", fontFamily: "var(--font-body)" }}
+                            >
+                              <ImageIcon size={10} />
+                              {tryOnLoading === i ? "Visualizing…" : "Visualize"}
+                            </button>
                             <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "var(--accent)", color: "white", fontFamily: "var(--font-body)", fontWeight: 700 }}>
                               {outfit.score}%
                             </span>
                           </div>
+                          {tryOnNotes[i] && (
+                            <p className="text-xs mt-1" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>{tryOnNotes[i]}</p>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -401,7 +436,7 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
 
               <div className="flex-1 overflow-y-auto px-5 pb-4" style={{ scrollbarWidth: "none" }}>
                 <div className="grid grid-cols-3 gap-2">
-                  {WARDROBE_ITEMS.map((item) => {
+                  {wardrobeItems.map((item) => {
                     const isSelected = selectedItems.includes(item.id);
                     return (
                       <div
@@ -424,7 +459,13 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
                           </div>
                         )}
                         <div style={{ height: 100 }}>
-                          <img src={item.img} alt={item.name} className="w-full h-full object-cover" />
+                          {item.image_url ? (
+                            <img src={item.image_url} alt={item.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-xs px-2 text-center" style={{ background: "var(--muted)", color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>
+                              {item.name}
+                            </div>
+                          )}
                         </div>
                         <div className="px-2 py-1.5">
                           <p className="text-xs truncate" style={{ fontFamily: "var(--font-body)", fontWeight: 600, color: "var(--foreground)" }}>{item.name}</p>

@@ -178,7 +178,7 @@ const PRODUCT_EXTRA: Record<number, {
 };
 
 const FALLBACK_EXTRA = {
-  images: ["https://images.unsplash.com/photo-1525507119028-ed4c629a60a3?w=600&h=780&fit=crop&auto=format"],
+  images: [] as string[],
   description: "A beautifully crafted wardrobe essential, designed to complement your existing pieces.",
   sizes: ["XS", "S", "M", "L", "XL"],
   material: [{ label: "Composition", value: "Natural fibres" }],
@@ -187,8 +187,16 @@ const FALLBACK_EXTRA = {
   completesWith: [],
 };
 
+function resolveProductExtra(item: ShopItem) {
+  const base = PRODUCT_EXTRA[item.id] ?? FALLBACK_EXTRA;
+  const images = item.img
+    ? [item.img, ...base.images.filter((url) => url !== item.img)]
+    : base.images;
+  return { ...base, images };
+}
+
 export function ProductDetailScreen({ item, recommendedSize, onBack, onAddToCart, inCart }: ProductDetailScreenProps) {
-  const extra        = PRODUCT_EXTRA[item.id] ?? FALLBACK_EXTRA;
+  const extra        = resolveProductExtra(item);
   const displayPrice = item.sale && item.salePrice ? item.salePrice : item.price;
   const savings      = item.sale && item.salePrice ? item.price - item.salePrice : 0;
 
@@ -216,11 +224,17 @@ export function ProductDetailScreen({ item, recommendedSize, onBack, onAddToCart
     >
       {/* Image carousel */}
       <div className="relative" style={{ height: 400, background: "var(--muted)" }}>
-        <img
-          src={extra.images[activeImg]}
-          alt={item.name}
-          className="w-full h-full object-cover"
-        />
+        {extra.images[activeImg] ? (
+          <img
+            src={extra.images[activeImg]}
+            alt={item.name}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center px-6 text-center text-sm" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>
+            No image available
+          </div>
+        )}
 
         {/* Top bar */}
         <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-12">

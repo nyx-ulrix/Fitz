@@ -36,11 +36,23 @@ export function WardrobeScreen() {
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [collapsed, setCollapsed]         = useState<string[]>([]);
 
-  const fetchWardrobe = async () => {
+  const fetchWardrobeItems = async () => {
     if (!token) return;
     try {
       const { items: data } = await api.getWardrobe(token);
-      setItems(data ?? []);
+      setItems(
+        (data ?? []).map((item: WardrobeItem & { colour?: string; image_url?: string; imageUrl?: string }) => ({
+          id: item.id,
+          name: item.name,
+          brand: item.brand ?? "Wardrobe",
+          category: item.category ?? "tops",
+          colour: item.colour ?? "",
+          season: item.season ?? "",
+          price: item.price ?? 0,
+          worn: item.worn ?? 0,
+          img: item.img ?? item.image_url ?? item.imageUrl,
+        })),
+      );
     } catch (e) {
       console.log("Fetch wardrobe error:", e);
     } finally {
@@ -48,7 +60,7 @@ export function WardrobeScreen() {
     }
   };
 
-  useEffect(() => { fetchWardrobe(); }, [token]);
+  useEffect(() => { fetchWardrobeItems(); }, [token]);
 
   const toggleSelect  = (id: string) => setSelectedItems(p => p.includes(id) ? p.filter(i => i !== id) : [...p, id]);
   const toggleCollapse = (id: string) => setCollapsed(p => p.includes(id) ? p.filter(c => c !== id) : [...p, id]);
@@ -70,7 +82,7 @@ export function WardrobeScreen() {
     return (
       <AnimatePresence mode="wait">
         <motion.div key="add" initial={{ x: "100%", opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: "100%", opacity: 0 }} transition={{ type: "spring", damping: 28, stiffness: 300 }}>
-          <AddItemScreen onBack={() => { setShowAddScreen(false); fetchWardrobe(); }} />
+          <AddItemScreen onBack={() => { setShowAddScreen(false); fetchWardrobeItems(); }} />
         </motion.div>
       </AnimatePresence>
     );

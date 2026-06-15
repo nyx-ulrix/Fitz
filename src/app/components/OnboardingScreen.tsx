@@ -1,10 +1,15 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Camera, ArrowRight, Check, Sparkles, User, Mail, ArrowLeft, RefreshCw, AlertCircle } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/AuthContext";
+import { useApp } from "../context/AppContext";
+import { analyzeImage } from "../lib/fitzApi";
+import { toStyleAnalysis } from "../lib/analysisAdapter";
+import { ACCEPTED_IMAGE_TYPES, MAX_IMAGE_BYTES, readImage } from "../lib/images";
+import type { StyleAnalysis } from "../lib/types";
 
-type Step = "welcome" | "account" | "photo" | "analysing" | "results" | "done";
+type Step = "welcome" | "login" | "account" | "photo" | "analysing" | "results" | "done";
 
 interface Profile {
   name: string;
@@ -16,106 +21,159 @@ interface OnboardingScreenProps {
   onComplete: () => void;
 }
 
-const SAMPLE_PHOTOS = [
-  "https://images.unsplash.com/photo-1581841064838-a470c740e8ee?w=600&h=800&fit=crop&auto=format",
-  "https://images.unsplash.com/photo-1616639943825-e0fbad20a3d3?w=600&h=800&fit=crop&auto=format",
-  "https://images.unsplash.com/photo-1652473291442-7a2e034a00d1?w=600&h=800&fit=crop&auto=format",
-];
 
-const AI_RESULTS = {
-  undertone: "Warm",
-  season: "Spring / Autumn",
-  skinTone: "Medium Warm",
-  palette: [
-    { name: "Camel",     hex: "#c19a6b" },
-    { name: "Terracotta",hex: "#c0694a" },
-    { name: "Sage",      hex: "#8aab8a" },
-    { name: "Ivory",     hex: "#f5f0e8" },
-    { name: "Warm Rust", hex: "#b5451b" },
-    { name: "Olive",     hex: "#8a8a4a" },
-    { name: "Blush",     hex: "#e8a898" },
-    { name: "Chocolate", hex: "#5c3d2e" },
-  ],
-  avoidColours: [
-    { name: "Icy Blue",  hex: "#b8d4e8" },
-    { name: "Cool Grey", hex: "#9a9aaa" },
-    { name: "Fuchsia",   hex: "#c8408a" },
-  ],
-  measurements: {
-    height:    "167 cm",
-    bust:      "86 cm",
-    waist:     "68 cm",
-    hips:      "94 cm",
-    inseam:    "78 cm",
-    shoulders: "38 cm",
-  },
-  sizes: {
-    tops:    "S",
-    bottoms: "36",
-    shoes:   "38",
-  },
-  bodyShape: "Hourglass",
-  styleAdvice: "Your proportions suit high-waisted bottoms, fitted midlayers, and A-line or wrap silhouettes that define your waist.",
+const EMPTY_ANALYSIS: StyleAnalysis = {
+  undertone: "",
+  season: "",
+  skinTone: "",
+  palette: [],
+  avoidColours: [],
+  measurements: {},
+  sizes: {},
+  bodyShape: "",
+  styleAdvice: "",
 };
 
 const ANALYSIS_STEPS = [
   "Detecting skin tone & undertone…",
   "Mapping your seasonal colour palette…",
-  "Estimating body measurements…",
-  "Identifying your body shape…",
-  "Building your style profile…",
+  "Building styling recommendations…",
+  "Finalizing your colour profile…",
 ];
 
 export function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
-  const { signIn, refreshProfile, token } = useAuth();
+  const { signIn, signInWithGoogle, refreshProfile } = useAuth();
+  const { setPhotoDataUrl, setAppearanceAnalysis } = useApp();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [step, setStep]           = useState<Step>("welcome");
   const [profile, setProfile]     = useState<Profile>({ name: "", email: "", photoUrl: "" });
+  const [photoDataUrl, setPhotoDataUrlLocal] = useState("");
+  const [analysis, setAnalysis]   = useState<StyleAnalysis>(EMPTY_ANALYSIS);
   const [password, setPassword]   = useState("");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
   const [analysisStep, setAnalysisStep] = useState(0);
   const [resultsTab, setResultsTab] = useState<"colour" | "measurements">("colour");
   const [authError, setAuthError] = useState("");
+  const [analysisError, setAnalysisError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const handleCreateAccount = async () => {
+  const handlePhotoFile = async (file?: File) => {
+    if (!file) return;
+    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+      setAnalysisError("Please choose a JPEG, PNG, or WebP image.");
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setAnalysisError("Please choose an image that is 5 MB or smaller.");
+      return;
+    }
+    setAnalysisError("");
+    try {
+      const dataUrl = await readImage(file);
+      setPhotoDataUrlLocal(dataUrl);
+      setProfile((p) => ({ ...p, photoUrl: dataUrl }));
+    } catch {
+      setAnalysisError("Could not read the image.");
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
     if (submitting) return;
     setSubmitting(true);
     setAuthError("");
     try {
-      await api.signup(profile.name, profile.email, password);
-      await signIn(profile.email, password);
-      setStep("photo");
-    } catch (err: any) {
-      setAuthError(err.message ?? "Signup failed. Please try again.");
+      await signInWithGoogle();
+    } catch (err: unknown) {
+      setAuthError(
+        err instanceof Error ? err.message : "Google sign-in failed. Please try again.",
+      );
+      setSubmitting(false);
+    }
+  };
+
+  const handleSignIn = async () => {
+    if (submitting || !canSignIn) return;
+    setSubmitting(true);
+    setAuthError("");
+    try {
+      await signIn(loginEmail.trim(), loginPassword);
+      onComplete();
+    } catch (err: unknown) {
+      setAuthError(
+        err instanceof Error ? err.message : "Sign in failed. Please try again.",
+      );
     } finally {
       setSubmitting(false);
     }
   };
 
-  const startAnalysis = () => {
+  const handleCreateAccount = async () => {
+    if (submitting || !canAdvanceAccount) return;
+    setSubmitting(true);
+    setAuthError("");
+    try {
+      await api.signup(profile.name, profile.email, password);
+      setStep("photo");
+    } catch (err: unknown) {
+      setAuthError(
+        err instanceof Error ? err.message : "Signup failed. Please try again.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const startAnalysis = async () => {
+    if (!photoDataUrl) return;
     setStep("analysing");
     setAnalysisStep(0);
-    let i = 0;
+    setAnalysisError("");
+
     const tick = setInterval(() => {
-      i++;
-      setAnalysisStep(i);
-      if (i >= ANALYSIS_STEPS.length) {
-        clearInterval(tick);
-        setTimeout(() => setStep("results"), 400);
-      }
-    }, 700);
+      setAnalysisStep((prev) => Math.min(prev + 1, ANALYSIS_STEPS.length - 1));
+    }, 600);
+
+    try {
+      const { analysis: raw } = await analyzeImage(photoDataUrl);
+      const styled = toStyleAnalysis(raw);
+      setAnalysis(styled);
+      setAppearanceAnalysis(raw);
+      setPhotoDataUrl(photoDataUrl);
+      setStep("results");
+    } catch (err: unknown) {
+      setAnalysisError(
+        err instanceof Error ? err.message : "Could not analyze the photo",
+      );
+      setStep("photo");
+    } finally {
+      clearInterval(tick);
+    }
   };
 
   const handleFinish = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    setAuthError("");
     try {
-      if (token) {
-        await api.updateProfile(token, { photoUrl: profile.photoUrl, ...AI_RESULTS });
-        await refreshProfile();
-      }
-    } catch (e) { console.log("Save profile error:", e); }
-    onComplete();
+      const accessToken = await signIn(profile.email, password);
+      await api.updateProfile(accessToken, {
+        photoUrl: profile.photoUrl,
+        ...analysis,
+      });
+      await refreshProfile();
+      onComplete();
+    } catch (err: unknown) {
+      setAuthError(
+        err instanceof Error ? err.message : "Could not finish setup. Please try again.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const canAdvanceAccount = profile.name.trim().length > 1 && profile.email.includes("@") && password.length >= 8;
+  const canSignIn = loginEmail.includes("@") && loginPassword.length >= 8;
   const canAdvancePhoto   = profile.photoUrl.length > 0;
 
   return (
@@ -158,16 +216,114 @@ export function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
                 className="w-full py-4 rounded-2xl flex items-center justify-center gap-2 text-sm"
                 style={{ background: "linear-gradient(135deg, var(--accent), #7e5fbf)", color: "white", fontFamily: "var(--font-body)", fontWeight: 700, boxShadow: "0 6px 24px rgba(169,139,227,0.45)" }}
               >
-                Get Started <ArrowRight size={17} />
+                Sign Up <ArrowRight size={17} />
               </motion.button>
               <button
-                onClick={onComplete}
-                className="w-full mt-3 py-3 text-sm"
-                style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}
+                onClick={() => { setAuthError(""); setStep("login"); }}
+                className="w-full mt-3 py-4 rounded-2xl text-sm"
+                style={{ background: "var(--card)", border: "1.5px solid var(--border)", color: "var(--foreground)", fontFamily: "var(--font-body)", fontWeight: 600 }}
               >
-                Skip for now
+                Log In
+              </button>
+              <button
+                onClick={() => void handleGoogleSignIn()}
+                disabled={submitting}
+                className="w-full mt-3 py-4 rounded-2xl text-sm flex items-center justify-center gap-2"
+                style={{ background: "white", border: "1.5px solid var(--border)", color: "#1f1f1f", fontFamily: "var(--font-body)", fontWeight: 600 }}
+              >
+                <span style={{ fontSize: "1.1rem" }}>G</span>
+                {submitting ? "Redirecting…" : "Continue with Google"}
               </button>
             </div>
+          </motion.div>
+        )}
+
+        {/* ── LOGIN ── */}
+        {step === "login" && (
+          <motion.div key="login" initial={{ x: "100%", opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: "-100%", opacity: 0 }}
+            transition={{ type: "spring", damping: 28, stiffness: 300 }}
+            className="flex flex-col px-6 pt-14 pb-10" style={{ minHeight: "100dvh" }}
+          >
+            <button onClick={() => setStep("welcome")} className="mb-8 self-start w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+              <ArrowLeft size={16} style={{ color: "var(--foreground)" }} />
+            </button>
+
+            <h1 style={{ fontFamily: "var(--font-display)", fontSize: "1.8rem", fontWeight: 700, color: "var(--foreground)", lineHeight: 1.2 }}>
+              Welcome<br />back
+            </h1>
+            <p className="mt-2 mb-8 text-sm" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>
+              Log in to access your wardrobe and style profile.
+            </p>
+
+            <div className="flex flex-col gap-3 flex-1">
+              <div className="p-4 rounded-2xl" style={{ background: "var(--card)", border: "1.5px solid var(--border)" }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <Mail size={13} style={{ color: "var(--accent)" }} />
+                  <p className="text-xs" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Email</p>
+                </div>
+                <input
+                  type="email"
+                  placeholder="sophie@example.com"
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  className="w-full bg-transparent outline-none text-sm"
+                  style={{ color: "var(--foreground)", fontFamily: "var(--font-body)" }}
+                />
+              </div>
+
+              <div className="p-4 rounded-2xl" style={{ background: "var(--card)", border: "1.5px solid var(--border)" }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <p className="text-xs" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Password</p>
+                </div>
+                <input
+                  type="password"
+                  placeholder="Min. 8 characters"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  className="w-full bg-transparent outline-none text-sm"
+                  style={{ color: "var(--foreground)", fontFamily: "var(--font-body)" }}
+                />
+              </div>
+            </div>
+
+            {authError && (
+              <div className="mt-4 flex items-start gap-2 px-4 py-3 rounded-xl" style={{ background: "rgba(232,93,135,0.1)", border: "1px solid rgba(232,93,135,0.3)" }}>
+                <AlertCircle size={16} style={{ color: "#e85d87", flexShrink: 0, marginTop: 1 }} />
+                <p className="text-xs" style={{ color: "#e85d87", fontFamily: "var(--font-body)" }}>{authError}</p>
+              </div>
+            )}
+
+            <button
+              onClick={() => void handleSignIn()}
+              disabled={!canSignIn || submitting}
+              className="mt-8 w-full py-4 rounded-2xl flex items-center justify-center gap-2 text-sm"
+              style={{
+                background: canSignIn && !submitting ? "linear-gradient(135deg, var(--accent), #7e5fbf)" : "var(--muted)",
+                color: canSignIn && !submitting ? "white" : "var(--muted-foreground)",
+                fontFamily: "var(--font-body)", fontWeight: 700,
+                boxShadow: canSignIn && !submitting ? "0 6px 20px rgba(169,139,227,0.4)" : "none",
+              }}
+            >
+              {submitting ? "Signing in…" : "Log In"}
+            </button>
+
+            <button
+              onClick={() => void handleGoogleSignIn()}
+              disabled={submitting}
+              className="w-full mt-3 py-4 rounded-2xl text-sm flex items-center justify-center gap-2"
+              style={{ background: "white", border: "1.5px solid var(--border)", color: "#1f1f1f", fontFamily: "var(--font-body)", fontWeight: 600 }}
+            >
+              <span style={{ fontSize: "1.1rem" }}>G</span>
+              {submitting ? "Redirecting…" : "Continue with Google"}
+            </button>
+
+            <button
+              onClick={() => { setAuthError(""); setStep("account"); }}
+              className="w-full mt-4 py-3 text-sm"
+              style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}
+            >
+              New here? <span style={{ color: "var(--accent)", fontWeight: 600 }}>Sign up</span>
+            </button>
           </motion.div>
         )}
 
@@ -229,25 +385,53 @@ export function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
                   <p className="text-xs" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Password</p>
                 </div>
                 <input
-                  type="password" placeholder="Min. 8 characters"
+                  type="password"
+                  placeholder="Min. 8 characters"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   className="w-full bg-transparent outline-none text-sm"
                   style={{ color: "var(--foreground)", fontFamily: "var(--font-body)" }}
                 />
               </div>
             </div>
 
+            {authError && (
+              <div className="mt-4 flex items-start gap-2 px-4 py-3 rounded-xl" style={{ background: "rgba(232,93,135,0.1)", border: "1px solid rgba(232,93,135,0.3)" }}>
+                <AlertCircle size={16} style={{ color: "#e85d87", flexShrink: 0, marginTop: 1 }} />
+                <p className="text-xs" style={{ color: "#e85d87", fontFamily: "var(--font-body)" }}>{authError}</p>
+              </div>
+            )}
+
             <button
-              onClick={() => setStep("photo")}
-              disabled={!canAdvanceAccount}
+              onClick={() => void handleCreateAccount()}
+              disabled={!canAdvanceAccount || submitting}
               className="mt-8 w-full py-4 rounded-2xl flex items-center justify-center gap-2 text-sm"
               style={{
-                background: canAdvanceAccount ? "linear-gradient(135deg, var(--accent), #7e5fbf)" : "var(--muted)",
-                color: canAdvanceAccount ? "white" : "var(--muted-foreground)",
+                background: canAdvanceAccount && !submitting ? "linear-gradient(135deg, var(--accent), #7e5fbf)" : "var(--muted)",
+                color: canAdvanceAccount && !submitting ? "white" : "var(--muted-foreground)",
                 fontFamily: "var(--font-body)", fontWeight: 700,
-                boxShadow: canAdvanceAccount ? "0 6px 20px rgba(169,139,227,0.4)" : "none",
+                boxShadow: canAdvanceAccount && !submitting ? "0 6px 20px rgba(169,139,227,0.4)" : "none",
               }}
             >
-              Continue <ArrowRight size={16} />
+              {submitting ? "Creating account…" : "Continue"} {!submitting && <ArrowRight size={16} />}
+            </button>
+
+            <button
+              onClick={() => { setAuthError(""); setStep("login"); }}
+              className="w-full mt-4 py-3 text-sm"
+              style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}
+            >
+              Already have an account? <span style={{ color: "var(--accent)", fontWeight: 600 }}>Log in</span>
+            </button>
+
+            <button
+              onClick={() => void handleGoogleSignIn()}
+              disabled={submitting}
+              className="w-full mt-3 py-4 rounded-2xl text-sm flex items-center justify-center gap-2"
+              style={{ background: "white", border: "1.5px solid var(--border)", color: "#1f1f1f", fontFamily: "var(--font-body)", fontWeight: 600 }}
+            >
+              <span style={{ fontSize: "1.1rem" }}>G</span>
+              {submitting ? "Redirecting…" : "Continue with Google"}
             </button>
           </motion.div>
         )}
@@ -293,20 +477,30 @@ export function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
             {/* Photo options */}
             {!profile.photoUrl ? (
               <div className="flex flex-col gap-3">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={(e) => void handlePhotoFile(e.target.files?.[0])}
+                />
                 <button
-                  onClick={() => { setProfile((p) => ({ ...p, photoUrl: SAMPLE_PHOTOS[selectedPhoto] })); }}
+                  onClick={() => fileInputRef.current?.click()}
                   className="w-full py-4 rounded-2xl flex items-center justify-center gap-3"
                   style={{ background: "linear-gradient(135deg, var(--accent), #7e5fbf)", color: "white", fontFamily: "var(--font-body)", fontWeight: 700, boxShadow: "0 6px 20px rgba(169,139,227,0.4)" }}
                 >
                   <Camera size={18} /> Take Photo
                 </button>
                 <button
-                  onClick={() => { setProfile((p) => ({ ...p, photoUrl: SAMPLE_PHOTOS[selectedPhoto] })); }}
+                  onClick={() => fileInputRef.current?.click()}
                   className="w-full py-4 rounded-2xl flex items-center justify-center gap-2 text-sm"
                   style={{ background: "var(--card)", border: "1.5px solid var(--border)", color: "var(--foreground)", fontFamily: "var(--font-body)", fontWeight: 600 }}
                 >
                   Upload from camera roll
                 </button>
+                {analysisError && (
+                  <p className="text-xs text-center" style={{ color: "#e85d87", fontFamily: "var(--font-body)" }}>{analysisError}</p>
+                )}
               </div>
             ) : (
               <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col gap-4">
@@ -320,7 +514,7 @@ export function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
                       <span className="text-xs" style={{ color: "var(--foreground)", fontFamily: "var(--font-body)", fontWeight: 600 }}>Photo selected</span>
                     </div>
                     <button
-                      onClick={() => setProfile((p) => ({ ...p, photoUrl: "" }))}
+                      onClick={() => { setProfile((p) => ({ ...p, photoUrl: "" })); setPhotoDataUrlLocal(""); }}
                       className="px-3 py-1.5 rounded-full text-xs"
                       style={{ background: "rgba(246,242,255,0.9)", color: "var(--foreground)", fontFamily: "var(--font-body)" }}
                     >
@@ -451,9 +645,13 @@ export function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
                       <div>
                         <p className="text-xs" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>Undertone detected</p>
                         <p style={{ fontFamily: "var(--font-display)", fontSize: "1.1rem", fontWeight: 700, color: "var(--foreground)" }}>
-                          {AI_RESULTS.undertone} · {AI_RESULTS.skinTone}
+                          {analysis.undertone && analysis.skinTone
+                            ? `${analysis.undertone} · ${analysis.skinTone}`
+                            : "Pending analysis"}
                         </p>
-                        <p className="text-xs mt-0.5" style={{ color: "var(--accent)", fontFamily: "var(--font-body)", fontWeight: 600 }}>{AI_RESULTS.season} palette</p>
+                        {analysis.season && (
+                          <p className="text-xs mt-0.5" style={{ color: "var(--accent)", fontFamily: "var(--font-body)", fontWeight: 600 }}>{analysis.season} palette</p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -462,7 +660,7 @@ export function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
                   <div className="p-4 rounded-2xl" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
                     <p className="text-sm mb-3" style={{ fontFamily: "var(--font-body)", fontWeight: 600, color: "var(--foreground)" }}>Your Best Colours</p>
                     <div className="flex flex-wrap gap-3">
-                      {AI_RESULTS.palette.map((c) => (
+                      {analysis.palette.map((c) => (
                         <div key={c.name} className="flex flex-col items-center gap-1">
                           <div className="w-10 h-10 rounded-full" style={{ background: c.hex, border: "2px solid var(--border)", boxShadow: "0 2px 6px rgba(0,0,0,0.12)" }} />
                           <span className="text-xs text-center" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)", fontSize: "0.6rem", lineHeight: 1.2, maxWidth: 44 }}>{c.name}</span>
@@ -475,7 +673,7 @@ export function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
                   <div className="p-4 rounded-2xl" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
                     <p className="text-sm mb-3" style={{ fontFamily: "var(--font-body)", fontWeight: 600, color: "var(--foreground)" }}>Colours to Avoid</p>
                     <div className="flex gap-3">
-                      {AI_RESULTS.avoidColours.map((c) => (
+                      {analysis.avoidColours.map((c) => (
                         <div key={c.name} className="flex flex-col items-center gap-1">
                           <div className="relative w-10 h-10 rounded-full" style={{ background: c.hex, border: "2px solid var(--border)", opacity: 0.6 }}>
                             <div className="absolute inset-0 flex items-center justify-center">
@@ -502,10 +700,12 @@ export function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
                       </div>
                       <div>
                         <p className="text-xs" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>Body shape</p>
-                        <p style={{ fontFamily: "var(--font-display)", fontSize: "1.1rem", fontWeight: 700, color: "var(--foreground)" }}>{AI_RESULTS.bodyShape}</p>
+                        <p style={{ fontFamily: "var(--font-display)", fontSize: "1.1rem", fontWeight: 700, color: "var(--foreground)" }}>{analysis.bodyShape || "Not available from photo analysis"}</p>
                       </div>
                     </div>
-                    <p className="text-xs" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)", lineHeight: 1.6 }}>{AI_RESULTS.styleAdvice}</p>
+                    {analysis.styleAdvice && (
+                      <p className="text-xs" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)", lineHeight: 1.6 }}>{analysis.styleAdvice}</p>
+                    )}
                   </div>
 
                   {/* Measurements grid */}
@@ -515,7 +715,7 @@ export function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
                       <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>AI estimates — you can edit these in your profile</p>
                     </div>
                     <div className="grid grid-cols-2">
-                      {Object.entries(AI_RESULTS.measurements).map(([key, value], i, arr) => (
+                      {Object.entries(analysis.measurements).map(([key, value], i, arr) => (
                         <div key={key} className="px-4 py-3" style={{ borderBottom: i < arr.length - 2 ? "1px solid var(--border)" : "none", borderRight: i % 2 === 0 ? "1px solid var(--border)" : "none" }}>
                           <p className="text-xs capitalize" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>{key}</p>
                           <p style={{ fontFamily: "var(--font-display)", fontWeight: 700, color: "var(--foreground)", fontSize: "1rem", marginTop: 2 }}>{value}</p>
@@ -530,7 +730,7 @@ export function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
                       <p className="text-sm" style={{ fontFamily: "var(--font-body)", fontWeight: 600, color: "var(--foreground)" }}>Your Sizes</p>
                     </div>
                     <div className="flex">
-                      {Object.entries(AI_RESULTS.sizes).map(([key, value], i, arr) => (
+                      {Object.entries(analysis.sizes).map(([key, value], i, arr) => (
                         <div key={key} className="flex-1 px-4 py-3 text-center" style={{ borderRight: i < arr.length - 1 ? "1px solid var(--border)" : "none" }}>
                           <p className="text-xs capitalize" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>{key}</p>
                           <p style={{ fontFamily: "var(--font-display)", fontWeight: 700, color: "var(--accent)", fontSize: "1.2rem", marginTop: 2 }}>{value}</p>
@@ -543,12 +743,19 @@ export function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
             </AnimatePresence>
 
             <div className="px-5 mt-6">
+              {authError && (
+                <div className="mb-4 flex items-start gap-2 px-4 py-3 rounded-xl" style={{ background: "rgba(232,93,135,0.1)", border: "1px solid rgba(232,93,135,0.3)" }}>
+                  <AlertCircle size={16} style={{ color: "#e85d87", flexShrink: 0, marginTop: 1 }} />
+                  <p className="text-xs" style={{ color: "#e85d87", fontFamily: "var(--font-body)" }}>{authError}</p>
+                </div>
+              )}
               <button
-                onClick={onComplete}
+                onClick={() => void handleFinish()}
+                disabled={submitting}
                 className="w-full py-4 rounded-2xl flex items-center justify-center gap-2 text-sm"
-                style={{ background: "linear-gradient(135deg, var(--accent), #7e5fbf)", color: "white", fontFamily: "var(--font-body)", fontWeight: 700, boxShadow: "0 6px 20px rgba(169,139,227,0.4)" }}
+                style={{ background: "linear-gradient(135deg, var(--accent), #7e5fbf)", color: "white", fontFamily: "var(--font-body)", fontWeight: 700, boxShadow: "0 6px 20px rgba(169,139,227,0.4)", opacity: submitting ? 0.7 : 1 }}
               >
-                Enter My Wardrobe <ArrowRight size={17} />
+                {submitting ? "Signing you in…" : "Enter My Wardrobe"} {!submitting && <ArrowRight size={17} />}
               </button>
             </div>
           </motion.div>
