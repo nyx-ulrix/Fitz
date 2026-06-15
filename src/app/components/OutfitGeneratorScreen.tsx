@@ -5,6 +5,7 @@ import { useOutfitGeneration } from "../hooks/useOutfitGeneration";
 import { useApp } from "../context/AppContext";
 import { outfitToDisplay, type DisplayOutfit } from "../lib/outfitDisplay";
 import { OutfitTryOnSheet } from "./OutfitTryOnSheet";
+import { OutfitGarmentPreview } from "./OutfitGarmentPreview";
 
 const PROMPT_SUGGESTIONS = [
   "Y2K aesthetic with blue jeans",
@@ -265,9 +266,14 @@ export function OutfitGeneratorScreen() {
               </div>
               <div className="flex">
                 <div className="relative flex-shrink-0" style={{ width: 140, height: 180 }}>
-                  <img src={outfit.img} alt={outfit.name} className="w-full h-full object-cover" />
+                  <OutfitGarmentPreview
+                    garments={outfit.garmentItems}
+                    width={140}
+                    height={180}
+                    alt={outfit.name}
+                  />
                   <div
-                    className="absolute inset-0"
+                    className="absolute inset-0 pointer-events-none"
                     style={{ background: "linear-gradient(to right, transparent 70%, var(--card))" }}
                   />
                 </div>

@@ -8,6 +8,7 @@ import { outfitToDisplay, type DisplayOutfit } from "../lib/outfitDisplay";
 import { fetchWardrobe } from "../lib/fitzApi";
 import type { OutfitItem } from "../lib/types";
 import { OutfitTryOnSheet } from "./OutfitTryOnSheet";
+import { OutfitGarmentPreview } from "./OutfitGarmentPreview";
 
 
 interface HomeScreenProps {
@@ -386,8 +387,13 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
                     </div>
                     <div className="flex">
                       <div className="relative flex-shrink-0" style={{ width: 120, height: 160 }}>
-                        <img src={outfit.img} alt={outfit.name} className="w-full h-full object-cover" />
-                        <div className="absolute inset-0" style={{ background: "linear-gradient(to right, transparent 60%, var(--card))" }} />
+                        <OutfitGarmentPreview
+                          garments={outfit.garmentItems}
+                          width={120}
+                          height={160}
+                          alt={outfit.name}
+                        />
+                        <div className="absolute inset-0 pointer-events-none" style={{ background: "linear-gradient(to right, transparent 60%, var(--card))" }} />
                       </div>
                       <div className="flex-1 p-3 flex flex-col justify-between">
                         <div>
@@ -400,10 +406,24 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
                             Pieces
                           </p>
                           <div className="flex flex-col gap-1.5 mt-1.5">
-                            {outfit.items.map((item) => (
-                              <span key={item} className="text-sm px-2.5 py-1 rounded-xl" style={{ background: "var(--background)", color: "var(--foreground)", fontFamily: "var(--font-body)" }}>
-                                {item}
-                              </span>
+                            {outfit.garmentItems.map((item) => (
+                              <div key={`${item.name}-${item.category ?? "item"}`} className="flex items-center gap-2">
+                                <div
+                                  className="w-9 h-9 rounded-lg overflow-hidden flex-shrink-0"
+                                  style={{ border: `1.5px solid ${item.owned ? "var(--accent)" : "#e85d87"}` }}
+                                >
+                                  {item.img ? (
+                                    <img src={item.img} alt={item.name} className="w-full h-full object-cover" />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center text-[0.55rem] px-1 text-center" style={{ background: "var(--muted)", color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>
+                                      {item.name.slice(0, 6)}
+                                    </div>
+                                  )}
+                                </div>
+                                <span className="text-sm flex-1 truncate" style={{ color: "var(--foreground)", fontFamily: "var(--font-body)" }}>
+                                  {item.name}
+                                </span>
+                              </div>
                             ))}
                           </div>
                         </div>
