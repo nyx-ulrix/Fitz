@@ -76,6 +76,7 @@ export type ApiError = {
 export type TryOnResult = {
   imageUrl?: string;
   note?: string;
+  outfitNames?: string[];
   error?: string;
   details?: unknown;
 };

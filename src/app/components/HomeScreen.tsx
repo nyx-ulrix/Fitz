@@ -7,6 +7,7 @@ import { useOutfitGeneration } from "../hooks/useOutfitGeneration";
 import { outfitToDisplay, type DisplayOutfit } from "../lib/outfitDisplay";
 import { fetchWardrobe } from "../lib/fitzApi";
 import type { OutfitItem } from "../lib/types";
+import { OutfitComparisonSheet } from "./OutfitComparisonSheet";
 
 
 interface HomeScreenProps {
@@ -15,16 +16,22 @@ interface HomeScreenProps {
 
 export function HomeScreen({ onNavigate }: HomeScreenProps) {
   const { token, profile } = useAuth();
-  const { weather, weatherLoading, refreshWeather, photoDataUrl } = useApp();
+  const { weather, weatherLoading, weatherError, refreshWeather, photoDataUrl } = useApp();
   const {
     outfits: apiOutfits,
     generating,
     error,
     generate,
-    visualizeOutfit,
-    tryOnImages,
-    tryOnLoading,
-    tryOnNotes,
+    selectedOutfitIndices,
+    toggleOutfitSelection,
+    visualizeSelectedOutfits,
+    comparisonImage,
+    comparisonLabels,
+    comparisonNote,
+    comparisonLoading,
+    clearComparison,
+    maxVisualizeOutfits,
+    hasPhoto,
   } = useOutfitGeneration();
 
   const [prompt, setPrompt] = useState("");
@@ -36,11 +43,8 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
   const [likedOutfits, setLikedOutfits] = useState<number[]>([]);
 
   const displayOutfits = useMemo(
-    () =>
-      apiOutfits.map((outfit, i) =>
-        outfitToDisplay(outfit, i, tryOnImages[i]),
-      ),
-    [apiOutfits, tryOnImages],
+    () => apiOutfits.map((outfit, i) => outfitToDisplay(outfit, i)),
+    [apiOutfits],
   );
 
   const todayLabel = new Date().toLocaleDateString(undefined, {
@@ -142,7 +146,10 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
                   {weather?.temperature ?? (weatherLoading ? "…" : "—")}
                 </p>
                 <p className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.85)", fontFamily: "var(--font-body)" }}>
-                  {weather?.description ?? "Loading weather"} · {weather?.location ?? "Singapore"}
+                  {weatherError
+                    ? "Could not refresh weather"
+                    : weather?.description ?? (weatherLoading ? "Loading weather…" : "Singapore weather")}
+                  {" · "}{weather?.location ?? "Singapore"}
                 </p>
               </div>
             </div>
@@ -167,7 +174,9 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
           >
             <Sparkles size={12} color="white" style={{ flexShrink: 0 }} />
             <p className="text-xs text-white" style={{ fontFamily: "var(--font-body)", lineHeight: 1.4 }}>
-              {weather?.outfitAdvice ?? "Loading clothing advice for today…"}
+              {weatherError
+                ? `${weatherError} Tap refresh to try again.`
+                : weather?.outfitAdvice ?? (weatherLoading ? "Loading clothing advice for today…" : "Light layers work well in Singapore's humidity.")}
             </p>
           </div>
         </div>
@@ -314,9 +323,14 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
             className="px-5"
           >
             <div className="flex items-center justify-between mb-3">
-              <h2 style={{ fontFamily: "var(--font-display)", fontSize: "1.1rem", color: "var(--foreground)" }}>
-                Your Outfits
-              </h2>
+              <div>
+                <h2 style={{ fontFamily: "var(--font-display)", fontSize: "1.1rem", color: "var(--foreground)" }}>
+                  Your Outfits
+                </h2>
+                <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>
+                  Tap outfits to select, then visualize together (up to {maxVisualizeOutfits})
+                </p>
+              </div>
               <button
                 className="text-xs px-3 py-1 rounded-full flex items-center gap-1"
                 style={{ background: "var(--card)", color: "var(--muted-foreground)", fontFamily: "var(--font-body)", border: "1px solid var(--border)" }}

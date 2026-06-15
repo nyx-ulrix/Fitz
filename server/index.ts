@@ -4,6 +4,6 @@ import { createApp } from "./app.js";
 
 const app = createApp();
 
-serve({ fetch: app.fetch, port: API_PORT }, () => {
-  console.log(`Fitz API server listening on http://localhost:${API_PORT}`);
+serve({ fetch: app.fetch, port: API_PORT }, (info) => {
+  console.log(`Fitz API server listening on http://localhost:${info.port}`);
 });

@@ -12,132 +12,154 @@ import {
 
 type Message = { role: string; content: string };
 
-function hasCompleteWeather(value: unknown): value is Record<string, unknown> {
-  return (
-    isRecord(value) &&
-    ["description", "temperature", "humidity", "rainChance", "outfitAdvice"].every(
-      (key) => typeof value[key] === "string" && (value[key] as string).trim().length > 0,
-    )
-  );
+const AGNES_TIMEOUT_MS = 25_000;
+const WEATHER_CACHE_MS = 10 * 60 * 1000;
+
+let weatherCache: { expiresAt: number; payload: Record<string, unknown> } | null =
+  null;
+
+function singaporeTimestamp() {
+  return new Intl.DateTimeFormat("en-SG", {
+    dateStyle: "full",
+    timeStyle: "short",
+    timeZone: "Asia/Singapore",
+  }).format(new Date());
 }
 
-async function askAgnes(messages: Message[]) {
-  const response = await fetch(AGNES_ENDPOINT, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${AGNES_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "agnes-2.0-flash",
-      messages,
-      temperature: 0.1,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      `Agnes request failed (${response.status}): ${await response.text()}`,
-    );
-  }
-
-  const data: unknown = await response.json();
-  const rawText = getAssistantText(data);
-
-  if (!rawText) {
-    throw new Error("Agnes returned no weather assessment");
-  }
-
+function fallbackWeather(checkedAt: string) {
   return {
-    parsed: parseJsonResponse(rawText),
-    rawText,
+    location: "Singapore",
+    description: "Estimated: Warm, humid tropical conditions",
+    temperature: "Estimated: 28-32°C",
+    humidity: "Estimated: 75-90%",
+    rainChance: "Estimated: Chance of afternoon showers",
+    outfitAdvice:
+      "Wear lightweight breathable fabrics and keep a compact umbrella handy.",
+    sourceNote:
+      "Fallback estimate used because live weather lookup was slow or unavailable.",
+    checkedAt,
+    provider: "Fitz estimate",
   };
 }
 
-export async function weatherRoute(c: Context) {
+function normalizeWeather(parsed: unknown, checkedAt: string) {
+  const base = fallbackWeather(checkedAt);
+  if (!isRecord(parsed)) return base;
+
+  const fields = [
+    "location",
+    "description",
+    "temperature",
+    "humidity",
+    "rainChance",
+    "outfitAdvice",
+    "sourceNote",
+  ] as const;
+
+  const result = { ...base };
+  for (const key of fields) {
+    const value = parsed[key];
+    if (typeof value === "string" && value.trim()) {
+      result[key] = value.trim();
+    }
+  }
+
+  result.provider = "Agnes AI";
+  return result;
+}
+
+async function askAgnes(messages: Message[]) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), AGNES_TIMEOUT_MS);
+
   try {
-    if (!HAS_AGNES_API_KEY) {
-      return c.json(
-        {
-          error: "Agnes API key is not configured",
-          details:
-            "Set AGNES_API_KEY in server/.env or root .env, then restart the API server.",
-        },
-        500,
-      );
-    }
-
-    const singaporeTime = new Intl.DateTimeFormat("en-SG", {
-      dateStyle: "full",
-      timeStyle: "short",
-      timeZone: "Asia/Singapore",
-    }).format(new Date());
-
-    const systemPrompt = `You provide concise weather-aware clothing guidance.
-Use current information or tools when available. If live weather data is unavailable,
-provide a sensible Singapore seasonal estimate or range for the stated date and time.
-Clearly prefix estimated values with "Estimated:".
-Every requested field must contain a useful string. Never return null, an empty string,
-"not verified", "unavailable", or omit a field. Return valid JSON only.`;
-
-    const userPrompt = `Assess Singapore weather for outfit planning.
-
-Current Singapore date and time: ${singaporeTime}
-
-Return exactly:
-{
-  "location": "Singapore",
-  "description": "short weather description; label it estimated if not live",
-  "temperature": "value such as 30°C, or Estimated: 29-32°C",
-  "humidity": "value such as 78%, or Estimated: 70-85%",
-  "rainChance": "current rain status/chance, or an explicitly labeled estimate",
-  "outfitAdvice": "one practical clothing recommendation based on all values",
-  "sourceNote": "state whether values are live or estimated and why"
-}`;
-
-    let weatherResponse = await askAgnes([
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ]);
-
-    if (!hasCompleteWeather(weatherResponse.parsed)) {
-      weatherResponse = await askAgnes([
-        { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: `${userPrompt}
-
-Your previous response left required cards blank:
-${weatherResponse.rawText}
-
-Repair it now. Fill description, temperature, humidity, rainChance, and outfitAdvice.
-Use clearly labeled estimates or ranges where live values are unavailable.`,
-        },
-      ]);
-    }
-
-    if (!hasCompleteWeather(weatherResponse.parsed)) {
-      return c.json(
-        {
-          error: "Agnes returned an incomplete weather assessment",
-          details: weatherResponse.rawText,
-        },
-        502,
-      );
-    }
-
-    return c.json({
-      ...weatherResponse.parsed,
-      checkedAt: singaporeTime,
-      provider: "Agnes AI",
+    const response = await fetch(AGNES_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${AGNES_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "agnes-2.0-flash",
+        messages,
+        temperature: 0.1,
+      }),
+      signal: controller.signal,
     });
+
+    if (!response.ok) {
+      throw new Error(
+        `Agnes request failed (${response.status}): ${await response.text()}`,
+      );
+    }
+
+    const data: unknown = await response.json();
+    const rawText = getAssistantText(data);
+
+    if (!rawText) {
+      throw new Error("Agnes returned no weather assessment");
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = parseJsonResponse(rawText);
+    } catch {
+      throw new Error(`Agnes returned invalid JSON: ${rawText.slice(0, 200)}`);
+    }
+
+    return { parsed, rawText };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function weatherRoute(c: Context) {
+  const checkedAt = singaporeTimestamp();
+
+  try {
+    if (weatherCache && weatherCache.expiresAt > Date.now()) {
+      return c.json(weatherCache.payload);
+    }
+
+    if (!HAS_AGNES_API_KEY) {
+      const payload = fallbackWeather(checkedAt);
+      return c.json(payload);
+    }
+
+    const userPrompt = `Singapore outfit weather for ${checkedAt}.
+Return JSON only with keys location, description, temperature, humidity, rainChance, outfitAdvice, sourceNote.
+Use live data if available; otherwise prefix estimates with "Estimated:".`;
+
+    let payload: Record<string, unknown>;
+    try {
+      const weatherResponse = await askAgnes([
+        {
+          role: "system",
+          content:
+            "You provide concise Singapore weather for clothing choices. Return valid JSON only.",
+        },
+        { role: "user", content: userPrompt },
+      ]);
+      payload = normalizeWeather(weatherResponse.parsed, checkedAt);
+    } catch (error: unknown) {
+      console.log("Weather Agnes fallback:", error);
+      payload = fallbackWeather(checkedAt);
+    }
+
+    weatherCache = {
+      expiresAt: Date.now() + WEATHER_CACHE_MS,
+      payload,
+    };
+
+    return c.json(payload);
   } catch (error: unknown) {
     return c.json(
       {
-        error: "Weather server error",
-        details: error instanceof Error ? error.message : "Unknown error",
+        ...fallbackWeather(checkedAt),
+        error:
+          error instanceof Error ? error.message : "Unknown weather error",
       },
-      500,
+      200,
     );
   }
 }

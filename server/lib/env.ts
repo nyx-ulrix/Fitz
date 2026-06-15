@@ -1,4 +1,7 @@
-import "dotenv/config";
+import { config } from "dotenv";
+import path from "node:path";
+
+config({ path: path.resolve(process.cwd(), ".env") });
 
 export const AGNES_API_KEY = process.env.AGNES_API_KEY;
 export const AGNES_ENDPOINT =
