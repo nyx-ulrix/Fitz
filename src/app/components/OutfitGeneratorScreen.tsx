@@ -292,10 +292,24 @@ export function OutfitGeneratorScreen() {
                       Pieces
                     </p>
                     <div className="flex flex-col gap-1.5 mt-1.5">
-                      {outfit.items.map((item) => (
-                        <span key={item} className="text-sm px-2.5 py-1 rounded-xl" style={{ background: "var(--background)", color: "var(--foreground)", fontFamily: "var(--font-body)" }}>
-                          {item}
-                        </span>
+                      {outfit.garmentItems.map((item) => (
+                        <div key={`${item.name}-${item.category ?? "item"}`} className="flex items-center gap-2">
+                          <div
+                            className="w-9 h-9 rounded-lg overflow-hidden flex-shrink-0"
+                            style={{ border: `1.5px solid ${item.owned ? "var(--accent)" : "#e85d87"}` }}
+                          >
+                            {item.img ? (
+                              <img src={item.img} alt={item.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-[0.55rem] px-1 text-center" style={{ background: "var(--muted)", color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>
+                                {item.name.slice(0, 6)}
+                              </div>
+                            )}
+                          </div>
+                          <span className="text-sm flex-1 truncate" style={{ color: "var(--foreground)", fontFamily: "var(--font-body)" }}>
+                            {item.name}
+                          </span>
+                        </div>
                       ))}
                     </div>
                   </div>
