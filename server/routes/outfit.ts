@@ -8,7 +8,69 @@ import {
 } from "../lib/env.js";
 import { requireAuthUserId } from "../lib/requestAuth.js";
 import { getUserWardrobeItems } from "../lib/userWardrobe.js";
-import { getStringArray, isRecord } from "../lib/utils.js";
+import { getStringArray, isRecord, parseJsonResponse } from "../lib/utils.js";
+
+const AGNES_TIMEOUT_MS = 50_000;
+
+function slimWardrobeItem(item: Record<string, unknown>) {
+  return {
+    id: item.id,
+    name: item.name,
+    category: item.category,
+    color: item.color,
+    style: item.style,
+  };
+}
+
+async function askAgnesForOutfits(prompt: string) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), AGNES_TIMEOUT_MS);
+
+  try {
+    const aiResponse = await fetch(AGNES_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${AGNES_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "agnes-2.0-flash",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a fashion stylist API. Always return valid JSON only.",
+          },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.7,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!aiResponse.ok) {
+      throw new Error(`AI API request failed (${aiResponse.status})`);
+    }
+
+    const aiData: unknown = await aiResponse.json();
+    const rawText =
+      isRecord(aiData) &&
+      Array.isArray(aiData.choices) &&
+      isRecord(aiData.choices[0]) &&
+      isRecord(aiData.choices[0].message) &&
+      typeof aiData.choices[0].message.content === "string"
+        ? aiData.choices[0].message.content
+        : undefined;
+
+    if (!rawText) {
+      throw new Error("No response from AI");
+    }
+
+    return parseJsonResponse(rawText);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function getItemCategory(item: Record<string, unknown>) {
   const category =
@@ -151,6 +213,12 @@ export async function outfitRoute(c: Context) {
 
     const allowedWardrobeIds = wardrobeItemsWithImages.map((item) => item.id);
     const allowedShopIds = marketplaceItemsWithImages.map((item) => item.id);
+    const slimWardrobe = wardrobeItemsWithImages.map((item) =>
+      slimWardrobeItem(item as Record<string, unknown>),
+    );
+    const slimMarketplace = marketplaceItemsWithImages.map((item) =>
+      slimWardrobeItem(item as Record<string, unknown>),
+    );
 
     const prompt = `
 You are an AI fashion stylist for a wardrobe planning app.
@@ -187,10 +255,10 @@ Photo skin-tone and styling analysis:
 ${appearanceAnalysis ? JSON.stringify(appearanceAnalysis, null, 2) : "No photo analysis provided"}
 
 User wardrobe items:
-${JSON.stringify(wardrobeItemsWithImages, null, 2)}
+${JSON.stringify(slimWardrobe, null, 2)}
 
 Marketplace items:
-${marketplaceItemsWithImages.length > 0 ? JSON.stringify(marketplaceItemsWithImages, null, 2) : "No marketplace items are available. Use wardrobe items only."}
+${slimMarketplace.length > 0 ? JSON.stringify(slimMarketplace, null, 2) : "No marketplace items are available. Use wardrobe items only."}
 
 Return this exact JSON structure:
 {
@@ -210,60 +278,25 @@ Return this exact JSON structure:
 }
 `;
 
-    const aiResponse = await fetch(AGNES_ENDPOINT, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${AGNES_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "agnes-2.0-flash",
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are a fashion stylist API. Always return valid JSON only.",
-          },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.7,
-      }),
-    });
-
-    if (!aiResponse.ok) {
-      return c.json(
-        { error: "AI API request failed", details: await aiResponse.text() },
-        aiResponse.status as 400,
-      );
-    }
-
-    const aiData: unknown = await aiResponse.json();
-    const rawText =
-      isRecord(aiData) &&
-      Array.isArray(aiData.choices) &&
-      isRecord(aiData.choices[0]) &&
-      isRecord(aiData.choices[0].message) &&
-      typeof aiData.choices[0].message.content === "string"
-        ? aiData.choices[0].message.content
-        : undefined;
-
-    if (!rawText) {
-      return c.json({ error: "No response from AI", raw: aiData }, 500);
-    }
-
     let parsed: unknown;
     try {
-      parsed = JSON.parse(rawText);
-    } catch {
+      parsed = await askAgnesForOutfits(prompt);
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : "Outfit generation failed";
+      const status = message.includes("aborted") ? 504 : 502;
       return c.json(
-        { error: "AI did not return valid JSON", rawText },
-        500,
+        {
+          error: status === 504 ? "Outfit generation timed out" : "AI outfit generation failed",
+          details: message,
+        },
+        status,
       );
     }
 
     if (!isRecord(parsed) || !Array.isArray(parsed.outfits)) {
       return c.json(
-        { error: "AI response did not include an outfits array", rawText },
+        { error: "AI response did not include an outfits array" },
         500,
       );
     }

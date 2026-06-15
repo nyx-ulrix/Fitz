@@ -7,7 +7,10 @@ import {
 } from "../lib/fitzApi";
 import { useAuth } from "../lib/AuthContext";
 import { useApp } from "../context/AppContext";
-import { outfitGarments } from "../context/AppContext";
+import {
+  outfitItemsForTryOn,
+  validateOutfitForVisualization,
+} from "../lib/outfitValidation";
 
 const MAX_VISUALIZE_OUTFITS = 3;
 
@@ -110,6 +113,14 @@ export function useOutfitGeneration() {
       return;
     }
 
+    for (const outfit of selected) {
+      const validationError = validateOutfitForVisualization(outfit);
+      if (validationError) {
+        setError(validationError);
+        return;
+      }
+    }
+
     setComparisonLoading(true);
     setError(null);
     setComparisonImage(null);
@@ -117,13 +128,24 @@ export function useOutfitGeneration() {
     setComparisonNote(null);
 
     try {
-      const data = await generateTryOn({
-        personImage: photoDataUrl,
-        outfits: selected.map((outfit, index) => ({
-          outfitName: outfit.name ?? `Outfit ${index + 1}`,
-          garments: outfitGarments(outfit),
-        })),
-      });
+      let data;
+
+      if (selected.length === 1) {
+        const outfit = selected[0];
+        data = await generateTryOn({
+          personImage: photoDataUrl,
+          outfitName: outfit.name ?? "Outfit",
+          garments: outfitItemsForTryOn(outfit),
+        });
+      } else {
+        data = await generateTryOn({
+          personImage: photoDataUrl,
+          outfits: selected.map((outfit, index) => ({
+            outfitName: outfit.name ?? `Outfit ${index + 1}`,
+            garments: outfitItemsForTryOn(outfit),
+          })),
+        });
+      }
 
       if (!data.imageUrl) {
         throw new Error("No image returned");
@@ -131,8 +153,10 @@ export function useOutfitGeneration() {
 
       setComparisonImage(data.imageUrl);
       setComparisonLabels(
-        data.outfitNames ??
-          selected.map((outfit, index) => outfit.name ?? `Outfit ${index + 1}`),
+        selected.length === 1
+          ? [selected[0].name ?? "Your outfit"]
+          : data.outfitNames ??
+              selected.map((outfit, index) => outfit.name ?? `Outfit ${index + 1}`),
       );
       setComparisonNote(data.note ?? null);
     } catch (err: unknown) {

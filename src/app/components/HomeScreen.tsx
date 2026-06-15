@@ -328,7 +328,7 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
                   Your Outfits
                 </h2>
                 <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>
-                  Tap outfits to select, then visualize together (up to {maxVisualizeOutfits})
+                  Tap one outfit for a single try-on, or up to {maxVisualizeOutfits} to compare
                 </p>
               </div>
               <button
@@ -445,12 +445,16 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
               >
                 <ImageIcon size={16} />
                 {comparisonLoading
-                  ? "Creating comparison…"
+                  ? selectedOutfitIndices.length === 1
+                    ? "Creating try-on…"
+                    : "Creating comparison…"
                   : selectedOutfitIndices.length === 0
                     ? "Select outfits to visualize"
                     : !hasPhoto
                       ? "Add a profile photo to visualize"
-                      : `Visualize ${selectedOutfitIndices.length} outfit${selectedOutfitIndices.length > 1 ? "s" : ""}`}
+                      : selectedOutfitIndices.length === 1
+                        ? "Visualize outfit"
+                        : `Compare ${selectedOutfitIndices.length} outfits`}
               </button>
             </div>
           </motion.div>
@@ -462,6 +466,7 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
         imageUrl={comparisonImage}
         labels={comparisonLabels}
         note={comparisonNote}
+        mode={comparisonLabels.length === 1 ? "single" : "compare"}
         onClose={clearComparison}
       />
 

@@ -1,4 +1,5 @@
 import { isSupabaseConfigured, supabaseAnonKey, supabaseProjectUrl } from "./supabaseConfig";
+import { httpErrorMessage, readResponsePayload } from "./http";
 
 const BASE = isSupabaseConfigured()
   ? `${supabaseProjectUrl}/functions/v1/make-server-09284421`
@@ -14,9 +15,17 @@ async function request(path: string, options: RequestInit = {}, token?: string |
     ...(options.headers as Record<string, string> ?? {}),
   };
   const res = await fetch(`${BASE}${path}`, { ...options, headers });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error ?? "Request failed");
-  return data;
+  const { data, rawText } = await readResponsePayload(res);
+  if (data === null && rawText.trim()) {
+    throw new Error(httpErrorMessage(res, rawText, "Request failed"));
+  }
+  const payload = (data ?? {}) as { error?: string };
+  if (!res.ok) {
+    throw new Error(
+      payload.error ?? httpErrorMessage(res, rawText, "Request failed"),
+    );
+  }
+  return payload;
 }
 
 export const api = {
@@ -91,8 +100,16 @@ export const api = {
       headers: { Authorization: `Bearer ${token}` },
       body: formData,
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error ?? "Image upload failed");
-    return data as { imageUrl: string; path?: string };
+    const { data, rawText } = await readResponsePayload(res);
+    if (data === null && rawText.trim()) {
+      throw new Error(httpErrorMessage(res, rawText, "Image upload failed"));
+    }
+    const payload = (data ?? {}) as { error?: string; imageUrl?: string; path?: string };
+    if (!res.ok) {
+      throw new Error(
+        payload.error ?? httpErrorMessage(res, rawText, "Image upload failed"),
+      );
+    }
+    return payload as { imageUrl: string; path?: string };
   },
 };

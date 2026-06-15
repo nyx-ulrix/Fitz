@@ -201,7 +201,7 @@ export function OutfitGeneratorScreen() {
               </h2>
               {!generating && outfits.length > 0 && (
                 <p className="text-xs" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>
-                  Select up to {maxVisualizeOutfits}, then visualize together
+                  One outfit = one try-on · up to {maxVisualizeOutfits} to compare side by side
                 </p>
               )}
             </div>
@@ -349,12 +349,16 @@ export function OutfitGeneratorScreen() {
             >
               <ImageIcon size={16} />
               {comparisonLoading
-                ? "Creating comparison…"
+                ? selectedOutfitIndices.length === 1
+                  ? "Creating try-on…"
+                  : "Creating comparison…"
                 : selectedOutfitIndices.length === 0
                   ? "Select outfits to visualize"
                   : !hasPhoto
                     ? "Add a profile photo to visualize"
-                    : `Visualize ${selectedOutfitIndices.length} outfit${selectedOutfitIndices.length > 1 ? "s" : ""}`}
+                    : selectedOutfitIndices.length === 1
+                      ? "Visualize outfit"
+                      : `Compare ${selectedOutfitIndices.length} outfits`}
             </button>
           </div>
         )}
@@ -365,6 +369,7 @@ export function OutfitGeneratorScreen() {
         imageUrl={comparisonImage}
         labels={comparisonLabels}
         note={comparisonNote}
+        mode={comparisonLabels.length === 1 ? "single" : "compare"}
         onClose={clearComparison}
       />
 

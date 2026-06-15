@@ -6,6 +6,7 @@ type OutfitComparisonSheetProps = {
   imageUrl: string | null;
   labels: string[];
   note?: string | null;
+  mode?: "single" | "compare";
   onClose: () => void;
 };
 
@@ -14,6 +15,7 @@ export function OutfitComparisonSheet({
   imageUrl,
   labels,
   note,
+  mode = "compare",
   onClose,
 }: OutfitComparisonSheetProps) {
   return (
@@ -39,7 +41,7 @@ export function OutfitComparisonSheet({
             <div className="relative">
               <img
                 src={imageUrl}
-                alt="Outfit comparison"
+                alt={mode === "single" ? "Outfit try-on" : "Outfit comparison"}
                 className="w-full object-cover"
                 style={{ maxHeight: "62vh" }}
               />
@@ -61,9 +63,9 @@ export function OutfitComparisonSheet({
                   fontWeight: 700,
                 }}
               >
-                Your outfit comparison
+                {mode === "single" ? "Your try-on" : "Your outfit comparison"}
               </h2>
-              {labels.length > 0 && (
+              {mode === "compare" && labels.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-3">
                   {labels.map((label) => (
                     <span
@@ -79,6 +81,14 @@ export function OutfitComparisonSheet({
                     </span>
                   ))}
                 </div>
+              )}
+              {mode === "single" && labels[0] && (
+                <p
+                  className="text-sm mt-2"
+                  style={{ color: "var(--foreground)", fontFamily: "var(--font-body)", fontWeight: 600 }}
+                >
+                  {labels[0]}
+                </p>
               )}
               {note && (
                 <p

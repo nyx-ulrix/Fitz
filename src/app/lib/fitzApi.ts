@@ -6,6 +6,7 @@ import type {
   WardrobeResult,
   WeatherData,
 } from "./types";
+import { httpErrorMessage, readResponsePayload } from "./http";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -38,11 +39,15 @@ async function request<T>(
       ...(options.headers as Record<string, string>),
     },
   });
-  const data = (await response.json()) as T & { error?: string };
-  if (!response.ok) {
-    throw new Error(errorMessage(data, "Request failed"));
+  const { data, rawText } = await readResponsePayload(response);
+  if (data === null && rawText.trim()) {
+    throw new Error(httpErrorMessage(response, rawText, "Request failed"));
   }
-  return data;
+  const payload = (data ?? {}) as T & { error?: string };
+  if (!response.ok) {
+    throw new Error(errorMessage(payload, httpErrorMessage(response, rawText, "Request failed")));
+  }
+  return payload;
 }
 
 export function fetchWeather() {
