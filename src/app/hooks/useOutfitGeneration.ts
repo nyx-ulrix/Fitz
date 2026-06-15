@@ -12,8 +12,6 @@ import {
   validateOutfitForVisualization,
 } from "../lib/outfitValidation";
 
-const MAX_VISUALIZE_OUTFITS = 3;
-
 type GenerateOptions = {
   occasion: string;
   stylePreference: string;
@@ -36,13 +34,14 @@ export function useOutfitGeneration() {
   const [shoppingSkippedReason, setShoppingSkippedReason] = useState<
     string | null
   >(null);
-  const [selectedOutfitIndices, setSelectedOutfitIndices] = useState<number[]>(
-    [],
+  const [selectedOutfitIndex, setSelectedOutfitIndex] = useState<number | null>(
+    null,
   );
-  const [comparisonImage, setComparisonImage] = useState<string | null>(null);
-  const [comparisonLabels, setComparisonLabels] = useState<string[]>([]);
-  const [comparisonNote, setComparisonNote] = useState<string | null>(null);
-  const [comparisonLoading, setComparisonLoading] = useState(false);
+  const [tryOnImage, setTryOnImage] = useState<string | null>(null);
+  const [tryOnOutfitName, setTryOnOutfitName] = useState<string | null>(null);
+  const [tryOnPieces, setTryOnPieces] = useState<string[]>([]);
+  const [tryOnNote, setTryOnNote] = useState<string | null>(null);
+  const [tryOnLoading, setTryOnLoading] = useState(false);
 
   const generate = async (options: GenerateOptions) => {
     if (!token) {
@@ -58,10 +57,11 @@ export function useOutfitGeneration() {
     setGenerating(true);
     setError(null);
     setOutfits([]);
-    setSelectedOutfitIndices([]);
-    setComparisonImage(null);
-    setComparisonLabels([]);
-    setComparisonNote(null);
+    setSelectedOutfitIndex(null);
+    setTryOnImage(null);
+    setTryOnOutfitName(null);
+    setTryOnPieces([]);
+    setTryOnNote(null);
 
     try {
       const result = await generateOutfit(token, {
@@ -84,81 +84,58 @@ export function useOutfitGeneration() {
     }
   };
 
-  const toggleOutfitSelection = (index: number) => {
-    setSelectedOutfitIndices((current) => {
-      if (current.includes(index)) {
-        return current.filter((value) => value !== index);
-      }
-      if (current.length >= MAX_VISUALIZE_OUTFITS) {
-        return current;
-      }
-      return [...current, index];
-    });
+  const selectOutfit = (index: number) => {
+    setSelectedOutfitIndex((current) => (current === index ? null : index));
   };
 
-  const visualizeSelectedOutfits = async () => {
+  const visualizeSelectedOutfit = async () => {
     if (!photoDataUrl) {
       setError("Upload a person photo before creating a visualization.");
       return;
     }
 
-    const selected = selectedOutfitIndices
-      .slice()
-      .sort((a, b) => a - b)
-      .map((index) => outfits[index])
-      .filter(Boolean);
-
-    if (selected.length === 0) {
-      setError("Select at least one outfit to visualize.");
+    if (selectedOutfitIndex === null) {
+      setError("Select an outfit to visualize.");
       return;
     }
 
-    for (const outfit of selected) {
-      const validationError = validateOutfitForVisualization(outfit);
-      if (validationError) {
-        setError(validationError);
-        return;
-      }
+    const outfit = outfits[selectedOutfitIndex];
+    if (!outfit) {
+      setError("Selected outfit is no longer available.");
+      return;
     }
 
-    setComparisonLoading(true);
+    const validationError = validateOutfitForVisualization(outfit);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    const outfitName = outfit.name ?? `Outfit ${selectedOutfitIndex + 1}`;
+    const pieces = outfitItemsForTryOn(outfit).map((item) => item.name);
+
+    setTryOnLoading(true);
     setError(null);
-    setComparisonImage(null);
-    setComparisonLabels([]);
-    setComparisonNote(null);
+    setTryOnImage(null);
+    setTryOnOutfitName(null);
+    setTryOnPieces([]);
+    setTryOnNote(null);
 
     try {
-      let data;
-
-      if (selected.length === 1) {
-        const outfit = selected[0];
-        data = await generateTryOn({
-          personImage: photoDataUrl,
-          outfitName: outfit.name ?? "Outfit",
-          garments: outfitItemsForTryOn(outfit),
-        });
-      } else {
-        data = await generateTryOn({
-          personImage: photoDataUrl,
-          outfits: selected.map((outfit, index) => ({
-            outfitName: outfit.name ?? `Outfit ${index + 1}`,
-            garments: outfitItemsForTryOn(outfit),
-          })),
-        });
-      }
+      const data = await generateTryOn({
+        personImage: photoDataUrl,
+        outfitName,
+        garments: outfitItemsForTryOn(outfit),
+      });
 
       if (!data.imageUrl) {
         throw new Error("No image returned");
       }
 
-      setComparisonImage(data.imageUrl);
-      setComparisonLabels(
-        selected.length === 1
-          ? [selected[0].name ?? "Your outfit"]
-          : data.outfitNames ??
-              selected.map((outfit, index) => outfit.name ?? `Outfit ${index + 1}`),
-      );
-      setComparisonNote(data.note ?? null);
+      setTryOnImage(data.imageUrl);
+      setTryOnOutfitName(outfitName);
+      setTryOnPieces(pieces);
+      setTryOnNote(data.note ?? null);
     } catch (err: unknown) {
       setError(
         err instanceof Error
@@ -166,14 +143,15 @@ export function useOutfitGeneration() {
           : "Could not generate the visualization",
       );
     } finally {
-      setComparisonLoading(false);
+      setTryOnLoading(false);
     }
   };
 
-  const clearComparison = () => {
-    setComparisonImage(null);
-    setComparisonLabels([]);
-    setComparisonNote(null);
+  const clearTryOn = () => {
+    setTryOnImage(null);
+    setTryOnOutfitName(null);
+    setTryOnPieces([]);
+    setTryOnNote(null);
   };
 
   return {
@@ -181,18 +159,18 @@ export function useOutfitGeneration() {
     generating,
     error,
     shoppingSkippedReason,
-    selectedOutfitIndices,
-    comparisonImage,
-    comparisonLabels,
-    comparisonNote,
-    comparisonLoading,
+    selectedOutfitIndex,
+    tryOnImage,
+    tryOnOutfitName,
+    tryOnPieces,
+    tryOnNote,
+    tryOnLoading,
     generate,
-    toggleOutfitSelection,
-    visualizeSelectedOutfits,
-    clearComparison,
+    selectOutfit,
+    visualizeSelectedOutfit,
+    clearTryOn,
     setError,
     hasPhoto: Boolean(photoDataUrl),
     hasAnalysis: Boolean(appearanceAnalysis),
-    maxVisualizeOutfits: MAX_VISUALIZE_OUTFITS,
   };
 }

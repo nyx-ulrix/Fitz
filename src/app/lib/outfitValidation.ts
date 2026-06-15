@@ -1,10 +1,13 @@
 import type { Outfit, OutfitItem } from "./types";
 
-type GarmentKind = "top" | "outerwear" | "bottom" | "shoes" | "other";
+type GarmentKind = "top" | "outerwear" | "bottom" | "dress" | "shoes" | "other";
 
 function garmentKind(item: OutfitItem): GarmentKind {
   const description = `${item.category ?? ""} ${item.name}`.toLowerCase();
 
+  if (/(dress)/.test(description)) {
+    return "dress";
+  }
   if (/(jacket|coat|blazer|cardigan|overshirt|outerwear)/.test(description)) {
     return "outerwear";
   }
@@ -26,10 +29,20 @@ export function validateOutfitForVisualization(outfit: Outfit) {
     return "This outfit has no clothing items to visualize.";
   }
 
-  const counts = { top: 0, outerwear: 0, bottom: 0, shoes: 0 };
+  const counts = { top: 0, outerwear: 0, bottom: 0, dress: 0, shoes: 0 };
   for (const item of items) {
     const kind = garmentKind(item);
     if (kind in counts) counts[kind as keyof typeof counts] += 1;
+  }
+
+  const hasDress = counts.dress > 0;
+
+  if (counts.top === 0 && !hasDress) {
+    return "This outfit is missing a top. Regenerate or pick another outfit.";
+  }
+
+  if (counts.bottom === 0 && !hasDress) {
+    return "This outfit is missing a bottom. Regenerate or pick another outfit.";
   }
 
   if (counts.top > 1) {
@@ -46,7 +59,7 @@ export function validateOutfitForVisualization(outfit: Outfit) {
 export function outfitItemsForTryOn(outfit: Outfit) {
   const items = [...(outfit.ownedItems ?? []), ...(outfit.shopItems ?? [])];
   const picked: OutfitItem[] = [];
-  const used = { top: 0, outerwear: 0, bottom: 0, shoes: 0 };
+  const used = { top: 0, outerwear: 0, bottom: 0, dress: 0, shoes: 0 };
 
   for (const item of items) {
     const kind = garmentKind(item);
@@ -57,6 +70,7 @@ export function outfitItemsForTryOn(outfit: Outfit) {
     if (kind === "top" && used.top >= 1) continue;
     if (kind === "outerwear" && used.outerwear >= 1) continue;
     if (kind === "bottom" && used.bottom >= 1) continue;
+    if (kind === "dress" && used.dress >= 1) continue;
     if (kind === "shoes" && used.shoes >= 1) continue;
 
     picked.push(item);

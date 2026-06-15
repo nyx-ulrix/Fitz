@@ -83,14 +83,17 @@ export function generateOutfit(
   );
 }
 
+export function classifyGarment(imageUrl: string, name?: string) {
+  return request<{ category: string; label?: string }>("/api/classify-garment", {
+    method: "POST",
+    body: JSON.stringify({ imageUrl, name }),
+  });
+}
+
 export function generateTryOn(body: {
   personImage: string;
   garments?: { name: string; imageUrl: string }[];
   outfitName?: string;
-  outfits?: {
-    outfitName: string;
-    garments: { name: string; imageUrl: string }[];
-  }[];
 }) {
   return request<TryOnResult>("/api/try-on", {
     method: "POST",

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { AddItemScreen } from "./AddItemScreen";
 import { useAuth } from "../lib/AuthContext";
 import { api } from "../lib/api";
+import { classifyGarment } from "../lib/fitzApi";
 
 const CATEGORY_META = [
   { id: "tops",        label: "Tops",        emoji: "👚" },
@@ -44,6 +45,7 @@ export function WardrobeScreen() {
   const [draggingId, setDraggingId]       = useState<string | null>(null);
   const [dropTargetId, setDropTargetId]   = useState<string | null>(null);
   const [movingId, setMovingId]           = useState<string | null>(null);
+  const [tagNotice, setTagNotice]           = useState<string | null>(null);
   const [pointerActive, setPointerActive] = useState(false);
   const pendingDrag = useRef<{ id: string; x: number; y: number } | null>(null);
   const hasDraggedRef = useRef(false);
@@ -79,22 +81,58 @@ export function WardrobeScreen() {
     if (!item || item.category === categoryId) return;
 
     const previousCategory = item.category;
-    setItems((prev) =>
-      prev.map((i) => (i.id === itemId ? { ...i, category: categoryId } : i)),
-    );
+    const targetMeta = CATEGORY_META.find((c) => c.id === categoryId);
+    let verifiedCategory = categoryId;
     setMovingId(itemId);
+    setTagNotice(null);
+
+    if (item.img) {
+      try {
+        const result = await classifyGarment(item.img, item.name);
+        verifiedCategory = normalizeCategory(result.category);
+      } catch (e) {
+        console.log("Classify garment error:", e);
+      }
+    }
+
+    const verifiedMeta = CATEGORY_META.find((c) => c.id === verifiedCategory);
+
+    if (verifiedCategory === item.category) {
+      setTagNotice(
+        verifiedCategory !== categoryId
+          ? `"${item.name}" stays in ${verifiedMeta?.label ?? verifiedCategory} — photo check did not match ${targetMeta?.label ?? categoryId}`
+          : `"${item.name}" already tagged as ${verifiedMeta?.label ?? verifiedCategory}`,
+      );
+      setMovingId(null);
+      return;
+    }
+
+    setItems((prev) =>
+      prev.map((i) => (i.id === itemId ? { ...i, category: verifiedCategory } : i)),
+    );
+
+    setTagNotice(`"${item.name}" saved as ${verifiedMeta?.label ?? verifiedCategory}`);
 
     try {
-      if (token) await api.updateWardrobeItem(token, itemId, { category: categoryId });
+      if (token) {
+        await api.updateWardrobeItem(token, itemId, { category: verifiedCategory });
+      }
     } catch (e) {
       setItems((prev) =>
         prev.map((i) => (i.id === itemId ? { ...i, category: previousCategory } : i)),
       );
+      setTagNotice(null);
       console.log("Move item error:", e);
     } finally {
       setMovingId(null);
     }
   }, [items, token]);
+
+  useEffect(() => {
+    if (!tagNotice) return;
+    const timer = window.setTimeout(() => setTagNotice(null), 4500);
+    return () => window.clearTimeout(timer);
+  }, [tagNotice]);
 
   const updateDropTarget = useCallback((clientX: number, clientY: number) => {
     const under = document.elementFromPoint(clientX, clientY);
@@ -204,8 +242,13 @@ export function WardrobeScreen() {
       <div className="px-5 pt-6 pb-4">
         <h1 style={{ fontFamily: "var(--font-display)", fontSize: "1.75rem", fontWeight: 700, color: "var(--foreground)" }}>My Wardrobe</h1>
         <p className="text-sm mt-0.5" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>
-          {items.length} items{totalValue > 0 ? ` · £${totalValue.toLocaleString()} value` : ""}
+          {items.length} items{totalValue > 0 ? ` · £${totalValue.toLocaleString()} value` : ""} · drag items to recategorize
         </p>
+        {tagNotice && (
+          <p className="text-xs mt-2 px-3 py-2 rounded-xl" style={{ background: "var(--secondary)", color: "var(--foreground)", fontFamily: "var(--font-body)" }}>
+            {tagNotice}
+          </p>
+        )}
         <div className="flex gap-3 mt-4">
           {[
             { label: "Items",      value: items.length },

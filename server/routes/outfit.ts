@@ -85,19 +85,137 @@ function getItemCategory(item: Record<string, unknown>) {
     typeof item.name === "string" ? item.name.toLowerCase() : ""
   }`;
 
+  if (/(dress)/.test(description)) {
+    return "dress";
+  }
   if (/(jacket|coat|blazer|cardigan|overshirt|outerwear)/.test(description)) {
     return "outerwear";
   }
-  if (/(top|shirt|t-shirt|tee|polo|henley|sweater)/.test(description)) {
+  if (/(top|shirt|t-shirt|tee|polo|henley|sweater|blouse|hoodie)/.test(description)) {
     return "top";
   }
-  if (/(bottom|jean|trouser|pant|short|chino)/.test(description)) {
+  if (/(bottom|jean|trouser|pant|short|chino|skirt)/.test(description)) {
     return "bottom";
   }
   if (/(shoe|sneaker|loafer|boot|sandal)/.test(description)) {
     return "shoes";
   }
   return "other";
+}
+
+function outfitHasTopAndBottom(
+  itemIds: string[],
+  itemsById: Map<string, Record<string, unknown>>,
+) {
+  let hasTop = false;
+  let hasBottom = false;
+
+  for (const id of itemIds) {
+    const item = itemsById.get(id);
+    if (!item) continue;
+
+    const category = getItemCategory(item);
+    if (category === "dress") {
+      hasTop = true;
+      hasBottom = true;
+    } else if (category === "top") {
+      hasTop = true;
+    } else if (category === "bottom") {
+      hasBottom = true;
+    }
+  }
+
+  return { hasTop, hasBottom };
+}
+
+function pickItemIdByCategory(
+  category: "top" | "bottom",
+  items: Record<string, unknown>[],
+  excludeIds: Set<string>,
+) {
+  const match = items.find((item) => {
+    if (typeof item.id !== "string" || excludeIds.has(item.id)) return false;
+    return getItemCategory(item) === category;
+  });
+  return typeof match?.id === "string" ? match.id : null;
+}
+
+function ensureTopAndBottom(
+  ownedItemIds: string[],
+  shopItemIds: string[],
+  wardrobeItems: Record<string, unknown>[],
+  marketplaceItems: Record<string, unknown>[],
+  shopTheLook: boolean,
+  budget: number,
+) {
+  const wardrobeById = new Map(
+    wardrobeItems
+      .filter((item) => typeof item.id === "string")
+      .map((item) => [item.id as string, item]),
+  );
+  const marketplaceById = new Map(
+    marketplaceItems
+      .filter((item) => typeof item.id === "string")
+      .map((item) => [item.id as string, item]),
+  );
+  const allItemsById = new Map([...wardrobeById, ...marketplaceById]);
+
+  let owned = [...ownedItemIds];
+  let shop = [...shopItemIds];
+  const usedIds = () => new Set([...owned, ...shop]);
+
+  const fillMissing = (
+    category: "top" | "bottom",
+    ownedIds: string[],
+    shopIds: string[],
+  ) => {
+    const exclude = usedIds();
+    const wardrobePick = pickItemIdByCategory(
+      category,
+      wardrobeItems,
+      exclude,
+    );
+    if (wardrobePick) {
+      ownedIds.push(wardrobePick);
+      exclude.add(wardrobePick);
+      return;
+    }
+
+    if (!shopTheLook) return;
+
+    const shopPick = pickItemIdByCategory(category, marketplaceItems, exclude);
+    if (!shopPick) return;
+
+    const shopItem = marketplaceById.get(shopPick);
+    const price = Number(shopItem?.price ?? 0);
+    const currentShopTotal = shopIds.reduce((sum, id) => {
+      const item = marketplaceById.get(id);
+      return sum + Number(item?.price ?? 0);
+    }, 0);
+
+    if (currentShopTotal + price <= budget) {
+      shopIds.push(shopPick);
+    }
+  };
+
+  let composition = outfitHasTopAndBottom(
+    [...owned, ...shop],
+    allItemsById,
+  );
+  if (!composition.hasTop) fillMissing("top", owned, shop);
+  composition = outfitHasTopAndBottom([...owned, ...shop], allItemsById);
+  if (!composition.hasBottom) fillMissing("bottom", owned, shop);
+
+  owned = removeDuplicateCoreItems(owned, wardrobeItems);
+
+  return {
+    ownedItemIds: owned,
+    shopItemIds: shop,
+    isComplete: outfitHasTopAndBottom(
+      [...owned, ...shop],
+      allItemsById,
+    ),
+  };
 }
 
 function removeDuplicateCoreItems(
@@ -229,19 +347,20 @@ Rules:
 1. Use mostly the user's existing wardrobe items.
 2. Only use wardrobe item IDs from the provided wardrobe list.
 3. Only use marketplace item IDs from the provided marketplace list.
-4. Every outfit should include exactly one primary top, exactly one bottom, and one pair of shoes if available.
-5. Never select two shirts, polos, T-shirts, or other primary tops for the same outfit.
-6. An extra upper-body garment is allowed only when it is clearly outerwear such as a jacket, coat, blazer, cardigan, or overshirt.
-7. If mustWearItem is provided, include the closest matching wardrobe item.
-8. If shopTheLook is false, do not suggest marketplace items.
-9. If shopTheLook is true, marketplace items are optional.
-10. If suggesting marketplace items, total shop price for each outfit must be less than or equal to the budget.
-11. If the budget is too low, set shopItemIds to [] and use only wardrobe items.
-12. Do not invent item IDs.
-13. Use the weather assessment to choose practical fabrics, layers, and footwear.
-14. Use the photo's visible skin-tone, undertone, contrast, and recommended colours when choosing colour combinations.
-15. In each reason, explain both the weather suitability and why the colours complement the photo analysis.
-16. Return valid JSON only. No markdown.
+4. Every outfit MUST include at least one top and at least one bottom. A dress counts as both. Never return an outfit with only shoes, accessories, or outerwear.
+5. Prefer exactly one primary top and exactly one bottom per outfit, plus shoes if available.
+6. Never select two shirts, polos, T-shirts, or other primary tops for the same outfit.
+7. An extra upper-body garment is allowed only when it is clearly outerwear such as a jacket, coat, blazer, cardigan, or overshirt.
+8. If mustWearItem is provided, include the closest matching wardrobe item.
+9. If shopTheLook is false, do not suggest marketplace items.
+10. If shopTheLook is true, marketplace items are optional.
+11. If suggesting marketplace items, total shop price for each outfit must be less than or equal to the budget.
+12. If the budget is too low, set shopItemIds to [] and use only wardrobe items.
+13. Do not invent item IDs.
+14. Use the weather assessment to choose practical fabrics, layers, and footwear.
+15. Use the photo's visible skin-tone, undertone, contrast, and recommended colours when choosing colour combinations.
+16. In each reason, explain both the weather suitability and why the colours complement the photo analysis.
+17. Return valid JSON only. No markdown.
 
 User request:
 Occasion: ${occasion}
@@ -301,50 +420,92 @@ Return this exact JSON structure:
       );
     }
 
-    const cleanedOutfits = parsed.outfits.filter(isRecord).map((outfit) => {
-      const ownedItemIds = removeDuplicateCoreItems(
-        getStringArray(outfit.ownedItemIds).filter((id) =>
+    const cleanedOutfits = parsed.outfits
+      .filter(isRecord)
+      .map((outfit) => {
+        const rawOwnedIds = getStringArray(outfit.ownedItemIds).filter((id) =>
           allowedWardrobeIds.includes(id),
-        ),
-        wardrobeItemsWithImages,
+        );
+        const rawShopIds = getStringArray(outfit.shopItemIds).filter((id) =>
+          allowedShopIds.includes(id),
+        );
+
+        const ensured = ensureTopAndBottom(
+          rawOwnedIds,
+          rawShopIds,
+          wardrobeItemsWithImages as Record<string, unknown>[],
+          marketplaceItemsWithImages as Record<string, unknown>[],
+          shopTheLook,
+          budget,
+        );
+
+        const ownedItemIds = ensured.ownedItemIds;
+        let shopItemIds = ensured.shopItemIds;
+
+        const shopItems = marketplaceItemsWithImages.filter((item) =>
+          shopItemIds.includes(item.id),
+        );
+
+        const totalShopPrice = shopItems.reduce(
+          (sum, item) => sum + Number(item.price),
+          0,
+        );
+
+        const finalShopItemIds =
+          shopTheLook && totalShopPrice <= budget ? shopItemIds : [];
+
+        const finalShopItems = marketplaceItemsWithImages.filter((item) =>
+          finalShopItemIds.includes(item.id),
+        );
+
+        const finalTotalShopPrice = finalShopItems.reduce(
+          (sum, item) => sum + Number(item.price),
+          0,
+        );
+
+        const reasonSuffix = !ensured.isComplete.hasTop || !ensured.isComplete.hasBottom
+          ? " Note: this outfit could not be completed with both a top and bottom from your available items."
+          : "";
+
+        return {
+          ...outfit,
+          ownedItemIds,
+          shopItemIds: finalShopItemIds,
+          totalShopPrice: finalTotalShopPrice,
+          ownedItems: wardrobeItemsWithImages.filter((item) =>
+            ownedItemIds.includes(item.id),
+          ),
+          shopItems: finalShopItems,
+          reason:
+            typeof outfit.reason === "string"
+              ? `${outfit.reason}${reasonSuffix}`
+              : reasonSuffix.trim() || outfit.reason,
+        };
+      })
+      .filter((outfit) => {
+        const allIds = [
+          ...outfit.ownedItemIds,
+          ...outfit.shopItemIds,
+        ];
+        const itemsById = new Map(
+          [...wardrobeItemsWithImages, ...marketplaceItemsWithImages]
+            .filter((item) => typeof item.id === "string")
+            .map((item) => [item.id as string, item as Record<string, unknown>]),
+        );
+        const { hasTop, hasBottom } = outfitHasTopAndBottom(allIds, itemsById);
+        return hasTop && hasBottom;
+      });
+
+    if (cleanedOutfits.length === 0) {
+      return c.json(
+        {
+          error: "Could not build complete outfits",
+          details:
+            "Add at least one top and one bottom to your wardrobe so outfits can be generated.",
+        },
+        422,
       );
-
-      const shopItemIds = getStringArray(outfit.shopItemIds).filter((id) =>
-        allowedShopIds.includes(id),
-      );
-
-      const shopItems = marketplaceItemsWithImages.filter((item) =>
-        shopItemIds.includes(item.id),
-      );
-
-      const totalShopPrice = shopItems.reduce(
-        (sum, item) => sum + Number(item.price),
-        0,
-      );
-
-      const finalShopItemIds =
-        shopTheLook && totalShopPrice <= budget ? shopItemIds : [];
-
-      const finalShopItems = marketplaceItemsWithImages.filter((item) =>
-        finalShopItemIds.includes(item.id),
-      );
-
-      const finalTotalShopPrice = finalShopItems.reduce(
-        (sum, item) => sum + Number(item.price),
-        0,
-      );
-
-      return {
-        ...outfit,
-        ownedItemIds,
-        shopItemIds: finalShopItemIds,
-        totalShopPrice: finalTotalShopPrice,
-        ownedItems: wardrobeItemsWithImages.filter((item) =>
-          ownedItemIds.includes(item.id),
-        ),
-        shopItems: finalShopItems,
-      };
-    });
+    }
 
     const providedSkippedReason =
       typeof parsed.shoppingSkippedReason === "string"

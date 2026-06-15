@@ -5,6 +5,7 @@ import { analyzeImageRoute } from "./routes/analyze-image.js";
 import { outfitRoute } from "./routes/outfit.js";
 import { tryOnRoute } from "./routes/try-on.js";
 import { wardrobeRoute } from "./routes/wardrobe.js";
+import { classifyGarmentRoute } from "./routes/classify-garment.js";
 import { shopRoute } from "./routes/shop.js";
 
 export function createApp() {
@@ -24,6 +25,7 @@ export function createApp() {
   app.post("/api/analyze-image", analyzeImageRoute);
   app.post("/api/outfit", outfitRoute);
   app.post("/api/try-on", tryOnRoute);
+  app.post("/api/classify-garment", classifyGarmentRoute);
   app.get("/api/wardrobe", wardrobeRoute);
   app.get("/api/shop", shopRoute);
 

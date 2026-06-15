@@ -7,7 +7,7 @@ import { useOutfitGeneration } from "../hooks/useOutfitGeneration";
 import { outfitToDisplay, type DisplayOutfit } from "../lib/outfitDisplay";
 import { fetchWardrobe } from "../lib/fitzApi";
 import type { OutfitItem } from "../lib/types";
-import { OutfitComparisonSheet } from "./OutfitComparisonSheet";
+import { OutfitTryOnSheet } from "./OutfitTryOnSheet";
 
 
 interface HomeScreenProps {
@@ -22,15 +22,15 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
     generating,
     error,
     generate,
-    selectedOutfitIndices,
-    toggleOutfitSelection,
-    visualizeSelectedOutfits,
-    comparisonImage,
-    comparisonLabels,
-    comparisonNote,
-    comparisonLoading,
-    clearComparison,
-    maxVisualizeOutfits,
+    selectedOutfitIndex,
+    selectOutfit,
+    visualizeSelectedOutfit,
+    tryOnImage,
+    tryOnOutfitName,
+    tryOnPieces,
+    tryOnNote,
+    tryOnLoading,
+    clearTryOn,
     hasPhoto,
   } = useOutfitGeneration();
 
@@ -328,7 +328,7 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
                   Your Outfits
                 </h2>
                 <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>
-                  Tap one outfit for a single try-on, or up to {maxVisualizeOutfits} to compare
+                  Select one outfit, then visualize it on your photo
                 </p>
               </div>
               <button
@@ -340,10 +340,10 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
               </button>
             </div>
 
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-4">
               {displayOutfits.map((outfit, i) => {
                 const liked = likedOutfits.includes(outfit.id);
-                const isSelected = selectedOutfitIndices.includes(i);
+                const isSelected = selectedOutfitIndex === i;
                 return (
                   <motion.div
                     key={outfit.id}
@@ -360,57 +360,65 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
                         ? "2px solid var(--accent)"
                         : "1.5px solid var(--border)",
                     }}
-                    onClick={() => toggleOutfitSelection(i)}
+                    onClick={() => selectOutfit(i)}
                   >
+                    <div
+                      className="px-4 py-2.5 flex items-center justify-between"
+                      style={{ background: "var(--secondary)", borderBottom: "1px solid var(--border)" }}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div
+                          className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                          style={{
+                            background: isSelected ? "var(--accent)" : "var(--card)",
+                            border: isSelected ? "none" : "1.5px solid var(--border)",
+                          }}
+                        >
+                          {isSelected && <Check size={10} color="white" />}
+                        </div>
+                        <h3 className="truncate" style={{ fontFamily: "var(--font-display)", fontSize: "1rem", fontWeight: 700, color: "var(--foreground)" }}>
+                          {outfit.name}
+                        </h3>
+                      </div>
+                      <span className="text-xs px-2 py-0.5 rounded-full flex-shrink-0" style={{ background: "var(--card)", color: "var(--foreground)", fontFamily: "var(--font-body)" }}>
+                        {outfit.vibe}
+                      </span>
+                    </div>
                     <div className="flex">
                       <div className="relative flex-shrink-0" style={{ width: 120, height: 160 }}>
                         <img src={outfit.img} alt={outfit.name} className="w-full h-full object-cover" />
                         <div className="absolute inset-0" style={{ background: "linear-gradient(to right, transparent 60%, var(--card))" }} />
-                        <div
-                          className="absolute top-2 left-2 w-6 h-6 rounded-full flex items-center justify-center"
-                          style={{
-                            background: isSelected ? "var(--accent)" : "rgba(255,255,255,0.92)",
-                            border: isSelected ? "none" : "1.5px solid var(--border)",
-                          }}
-                        >
-                          {isSelected && <Check size={12} color="white" />}
-                        </div>
                       </div>
                       <div className="flex-1 p-3 flex flex-col justify-between">
                         <div>
-                          <div className="flex items-start justify-between">
-                            <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "var(--secondary)", color: "var(--foreground)", fontFamily: "var(--font-body)" }}>
-                              {outfit.vibe}
-                            </span>
+                          <div className="flex items-start justify-end">
                             <button onClick={(e) => { e.stopPropagation(); toggleLike(outfit.id); }}>
                               <Heart size={16} style={{ color: liked ? "#e85d87" : "var(--muted-foreground)" }} fill={liked ? "#e85d87" : "none"} />
                             </button>
                           </div>
-                          <p className="mt-1.5" style={{ fontFamily: "var(--font-display)", fontSize: "0.95rem", fontWeight: 600, color: "var(--foreground)" }}>
-                            {outfit.name}
+                          <p className="text-xs mt-1" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                            Pieces
                           </p>
-                        </div>
-                        <div>
-                          <div className="flex flex-wrap gap-1 mb-2">
+                          <div className="flex flex-col gap-1.5 mt-1.5">
                             {outfit.items.map((item) => (
-                              <span key={item} className="text-xs px-2 py-0.5 rounded-full" style={{ background: "var(--background)", color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>
+                              <span key={item} className="text-sm px-2.5 py-1 rounded-xl" style={{ background: "var(--background)", color: "var(--foreground)", fontFamily: "var(--font-body)" }}>
                                 {item}
                               </span>
                             ))}
                           </div>
-                          <div className="flex items-center justify-between gap-2">
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); setSelectedOutfit(outfit); }}
-                              className="text-xs"
-                              style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}
-                            >
-                              View details
-                            </button>
-                            <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "var(--accent)", color: "white", fontFamily: "var(--font-body)", fontWeight: 700 }}>
-                              {outfit.score}%
-                            </span>
-                          </div>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 mt-3">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setSelectedOutfit(outfit); }}
+                            className="text-xs"
+                            style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}
+                          >
+                            View details
+                          </button>
+                          <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "var(--accent)", color: "white", fontFamily: "var(--font-body)", fontWeight: 700 }}>
+                            {outfit.score}%
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -422,52 +430,48 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
             <div className="mt-4">
               <button
                 type="button"
-                onClick={() => void visualizeSelectedOutfits()}
+                onClick={() => void visualizeSelectedOutfit()}
                 disabled={
-                  comparisonLoading ||
-                  selectedOutfitIndices.length === 0 ||
+                  tryOnLoading ||
+                  selectedOutfitIndex === null ||
                   !hasPhoto
                 }
                 className="w-full py-3.5 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
                 style={{
-                  background: comparisonLoading || selectedOutfitIndices.length === 0 || !hasPhoto
+                  background: tryOnLoading || selectedOutfitIndex === null || !hasPhoto
                     ? "var(--muted)"
                     : "linear-gradient(135deg, var(--accent) 0%, #7e5fbf 100%)",
-                  color: comparisonLoading || selectedOutfitIndices.length === 0 || !hasPhoto
+                  color: tryOnLoading || selectedOutfitIndex === null || !hasPhoto
                     ? "var(--muted-foreground)"
                     : "white",
                   fontFamily: "var(--font-body)",
                   fontWeight: 700,
-                  boxShadow: selectedOutfitIndices.length > 0 && hasPhoto && !comparisonLoading
+                  boxShadow: selectedOutfitIndex !== null && hasPhoto && !tryOnLoading
                     ? "0 6px 20px rgba(169,139,227,0.45)"
                     : "none",
                 }}
               >
                 <ImageIcon size={16} />
-                {comparisonLoading
-                  ? selectedOutfitIndices.length === 1
-                    ? "Creating try-on…"
-                    : "Creating comparison…"
-                  : selectedOutfitIndices.length === 0
-                    ? "Select outfits to visualize"
+                {tryOnLoading
+                  ? "Creating try-on…"
+                  : selectedOutfitIndex === null
+                    ? "Select an outfit to visualize"
                     : !hasPhoto
                       ? "Add a profile photo to visualize"
-                      : selectedOutfitIndices.length === 1
-                        ? "Visualize outfit"
-                        : `Compare ${selectedOutfitIndices.length} outfits`}
+                      : "Visualize outfit"}
               </button>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      <OutfitComparisonSheet
-        open={Boolean(comparisonImage)}
-        imageUrl={comparisonImage}
-        labels={comparisonLabels}
-        note={comparisonNote}
-        mode={comparisonLabels.length === 1 ? "single" : "compare"}
-        onClose={clearComparison}
+      <OutfitTryOnSheet
+        open={Boolean(tryOnImage)}
+        imageUrl={tryOnImage}
+        outfitName={tryOnOutfitName}
+        pieces={tryOnPieces}
+        note={tryOnNote}
+        onClose={clearTryOn}
       />
 
       {/* Wardrobe Picker Sheet */}

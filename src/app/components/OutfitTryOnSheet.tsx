@@ -1,23 +1,23 @@
 import { X } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
-type OutfitComparisonSheetProps = {
+type OutfitTryOnSheetProps = {
   open: boolean;
   imageUrl: string | null;
-  labels: string[];
+  outfitName?: string | null;
+  pieces?: string[];
   note?: string | null;
-  mode?: "single" | "compare";
   onClose: () => void;
 };
 
-export function OutfitComparisonSheet({
+export function OutfitTryOnSheet({
   open,
   imageUrl,
-  labels,
+  outfitName,
+  pieces = [],
   note,
-  mode = "compare",
   onClose,
-}: OutfitComparisonSheetProps) {
+}: OutfitTryOnSheetProps) {
   return (
     <AnimatePresence>
       {open && imageUrl && (
@@ -41,7 +41,7 @@ export function OutfitComparisonSheet({
             <div className="relative">
               <img
                 src={imageUrl}
-                alt={mode === "single" ? "Outfit try-on" : "Outfit comparison"}
+                alt={outfitName ? `${outfitName} try-on` : "Outfit try-on"}
                 className="w-full object-cover"
                 style={{ maxHeight: "62vh" }}
               />
@@ -63,32 +63,36 @@ export function OutfitComparisonSheet({
                   fontWeight: 700,
                 }}
               >
-                {mode === "single" ? "Your try-on" : "Your outfit comparison"}
+                Your try-on
               </h2>
-              {mode === "compare" && labels.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-3">
-                  {labels.map((label) => (
-                    <span
-                      key={label}
-                      className="text-xs px-3 py-1.5 rounded-full"
-                      style={{
-                        background: "var(--secondary)",
-                        color: "var(--foreground)",
-                        fontFamily: "var(--font-body)",
-                      }}
-                    >
-                      {label}
-                    </span>
-                  ))}
-                </div>
-              )}
-              {mode === "single" && labels[0] && (
+              {outfitName && (
                 <p
                   className="text-sm mt-2"
                   style={{ color: "var(--foreground)", fontFamily: "var(--font-body)", fontWeight: 600 }}
                 >
-                  {labels[0]}
+                  {outfitName}
                 </p>
+              )}
+              {pieces.length > 0 && (
+                <div className="mt-4">
+                  <p
+                    className="text-xs mb-2"
+                    style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)", textTransform: "uppercase", letterSpacing: "0.06em" }}
+                  >
+                    Pieces in this outfit
+                  </p>
+                  <div className="flex flex-col gap-2">
+                    {pieces.map((piece) => (
+                      <div
+                        key={piece}
+                        className="px-3 py-2 rounded-xl text-sm"
+                        style={{ background: "var(--secondary)", color: "var(--foreground)", fontFamily: "var(--font-body)" }}
+                      >
+                        {piece}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
               {note && (
                 <p
