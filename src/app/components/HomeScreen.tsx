@@ -343,6 +343,7 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
             <div className="flex flex-col gap-3">
               {displayOutfits.map((outfit, i) => {
                 const liked = likedOutfits.includes(outfit.id);
+                const isSelected = selectedOutfitIndices.includes(i);
                 return (
                   <motion.div
                     key={outfit.id}
@@ -352,15 +353,28 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
                     className="rounded-3xl overflow-hidden cursor-pointer"
                     style={{
                       background: "var(--card)",
-                      boxShadow: "0 4px 20px rgba(169,139,227,0.15)",
-                      border: "1.5px solid var(--border)",
+                      boxShadow: isSelected
+                        ? "0 4px 20px rgba(169,139,227,0.28)"
+                        : "0 4px 20px rgba(169,139,227,0.15)",
+                      border: isSelected
+                        ? "2px solid var(--accent)"
+                        : "1.5px solid var(--border)",
                     }}
-                    onClick={() => setSelectedOutfit(outfit)}
+                    onClick={() => toggleOutfitSelection(i)}
                   >
                     <div className="flex">
                       <div className="relative flex-shrink-0" style={{ width: 120, height: 160 }}>
                         <img src={outfit.img} alt={outfit.name} className="w-full h-full object-cover" />
                         <div className="absolute inset-0" style={{ background: "linear-gradient(to right, transparent 60%, var(--card))" }} />
+                        <div
+                          className="absolute top-2 left-2 w-6 h-6 rounded-full flex items-center justify-center"
+                          style={{
+                            background: isSelected ? "var(--accent)" : "rgba(255,255,255,0.92)",
+                            border: isSelected ? "none" : "1.5px solid var(--border)",
+                          }}
+                        >
+                          {isSelected && <Check size={12} color="white" />}
+                        </div>
                       </div>
                       <div className="flex-1 p-3 flex flex-col justify-between">
                         <div>
@@ -385,27 +399,18 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
                             ))}
                           </div>
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>Tap to view</span>
                             <button
                               type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void visualizeOutfit(outfit.raw, i);
-                              }}
-                              disabled={tryOnLoading === i || !photoDataUrl}
-                              className="text-xs px-2 py-1 rounded-full flex items-center gap-1"
-                              style={{ background: "var(--secondary)", color: "var(--foreground)", fontFamily: "var(--font-body)" }}
+                              onClick={(e) => { e.stopPropagation(); setSelectedOutfit(outfit); }}
+                              className="text-xs"
+                              style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}
                             >
-                              <ImageIcon size={10} />
-                              {tryOnLoading === i ? "Visualizing…" : "Visualize"}
+                              View details
                             </button>
                             <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "var(--accent)", color: "white", fontFamily: "var(--font-body)", fontWeight: 700 }}>
                               {outfit.score}%
                             </span>
                           </div>
-                          {tryOnNotes[i] && (
-                            <p className="text-xs mt-1" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>{tryOnNotes[i]}</p>
-                          )}
                         </div>
                       </div>
                     </div>
@@ -413,9 +418,52 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
                 );
               })}
             </div>
+
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={() => void visualizeSelectedOutfits()}
+                disabled={
+                  comparisonLoading ||
+                  selectedOutfitIndices.length === 0 ||
+                  !hasPhoto
+                }
+                className="w-full py-3.5 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+                style={{
+                  background: comparisonLoading || selectedOutfitIndices.length === 0 || !hasPhoto
+                    ? "var(--muted)"
+                    : "linear-gradient(135deg, var(--accent) 0%, #7e5fbf 100%)",
+                  color: comparisonLoading || selectedOutfitIndices.length === 0 || !hasPhoto
+                    ? "var(--muted-foreground)"
+                    : "white",
+                  fontFamily: "var(--font-body)",
+                  fontWeight: 700,
+                  boxShadow: selectedOutfitIndices.length > 0 && hasPhoto && !comparisonLoading
+                    ? "0 6px 20px rgba(169,139,227,0.45)"
+                    : "none",
+                }}
+              >
+                <ImageIcon size={16} />
+                {comparisonLoading
+                  ? "Creating comparison…"
+                  : selectedOutfitIndices.length === 0
+                    ? "Select outfits to visualize"
+                    : !hasPhoto
+                      ? "Add a profile photo to visualize"
+                      : `Visualize ${selectedOutfitIndices.length} outfit${selectedOutfitIndices.length > 1 ? "s" : ""}`}
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      <OutfitComparisonSheet
+        open={Boolean(comparisonImage)}
+        imageUrl={comparisonImage}
+        labels={comparisonLabels}
+        note={comparisonNote}
+        onClose={clearComparison}
+      />
 
       {/* Wardrobe Picker Sheet */}
       <AnimatePresence>

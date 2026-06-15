@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
-import { Sparkles, Wand2, RefreshCw, Heart, Share2, ShoppingBag, X, ImageIcon } from "lucide-react";
+import { Sparkles, Wand2, RefreshCw, Heart, Share2, ShoppingBag, X, ImageIcon, Check } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useOutfitGeneration } from "../hooks/useOutfitGeneration";
 import { useApp } from "../context/AppContext";
 import { outfitToDisplay, type DisplayOutfit } from "../lib/outfitDisplay";
+import { OutfitComparisonSheet } from "./OutfitComparisonSheet";
 
 const PROMPT_SUGGESTIONS = [
   "Y2K aesthetic with blue jeans",
@@ -13,15 +14,22 @@ const PROMPT_SUGGESTIONS = [
 ];
 
 export function OutfitGeneratorScreen() {
-  const { weather, photoDataUrl } = useApp();
+  const { weather } = useApp();
   const {
     outfits: apiOutfits,
     generating,
     error,
     generate,
-    visualizeOutfit,
-    tryOnImages,
-    tryOnLoading,
+    selectedOutfitIndices,
+    toggleOutfitSelection,
+    visualizeSelectedOutfits,
+    comparisonImage,
+    comparisonLabels,
+    comparisonNote,
+    comparisonLoading,
+    clearComparison,
+    maxVisualizeOutfits,
+    hasPhoto,
   } = useOutfitGeneration();
 
   const [prompt, setPrompt] = useState("");
@@ -32,8 +40,8 @@ export function OutfitGeneratorScreen() {
   const [liked, setLiked] = useState<number[]>([]);
 
   const outfits = useMemo(
-    () => apiOutfits.map((o, i) => outfitToDisplay(o, i, tryOnImages[i])),
-    [apiOutfits, tryOnImages],
+    () => apiOutfits.map((o, i) => outfitToDisplay(o, i)),
+    [apiOutfits],
   );
 
   const handleGenerate = async () => {
@@ -187,9 +195,16 @@ export function OutfitGeneratorScreen() {
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Sparkles size={15} style={{ color: "var(--accent)" }} />
-            <h2 style={{ fontFamily: "var(--font-display)", fontSize: "1.1rem", color: "var(--foreground)" }}>
-              {generating ? "Generating outfits…" : "Your Outfits"}
-            </h2>
+            <div>
+              <h2 style={{ fontFamily: "var(--font-display)", fontSize: "1.1rem", color: "var(--foreground)" }}>
+                {generating ? "Generating outfits…" : "Your Outfits"}
+              </h2>
+              {!generating && outfits.length > 0 && (
+                <p className="text-xs" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>
+                  Select up to {maxVisualizeOutfits}, then visualize together
+                </p>
+              )}
+            </div>
           </div>
           <button
             className="text-xs px-3 py-1 rounded-full flex items-center gap-1"
@@ -206,7 +221,9 @@ export function OutfitGeneratorScreen() {
         )}
 
         <div className="flex flex-col gap-4">
-          {outfits.map((outfit, i) => (
+          {outfits.map((outfit, i) => {
+            const isSelected = selectedOutfitIndices.includes(i);
+            return (
             <motion.div
               key={outfit.id}
               initial={{ opacity: 0, y: 16 }}
@@ -215,10 +232,14 @@ export function OutfitGeneratorScreen() {
               className="rounded-3xl overflow-hidden cursor-pointer"
               style={{
                 background: "var(--card)",
-                boxShadow: "0 4px 20px rgba(169,139,227,0.15)",
-                border: "1.5px solid var(--border)",
+                boxShadow: isSelected
+                  ? "0 4px 20px rgba(169,139,227,0.28)"
+                  : "0 4px 20px rgba(169,139,227,0.15)",
+                border: isSelected
+                  ? "2px solid var(--accent)"
+                  : "1.5px solid var(--border)",
               }}
-              onClick={() => setSelectedOutfit(outfit)}
+              onClick={() => toggleOutfitSelection(i)}
             >
               <div className="flex">
                 <div className="relative flex-shrink-0" style={{ width: 140, height: 180 }}>
@@ -227,6 +248,15 @@ export function OutfitGeneratorScreen() {
                     className="absolute inset-0"
                     style={{ background: "linear-gradient(to right, transparent 70%, var(--card))" }}
                   />
+                  <div
+                    className="absolute top-2 left-2 w-6 h-6 rounded-full flex items-center justify-center"
+                    style={{
+                      background: isSelected ? "var(--accent)" : "rgba(255,255,255,0.92)",
+                      border: isSelected ? "none" : "1.5px solid var(--border)",
+                    }}
+                  >
+                    {isSelected && <Check size={12} color="white" />}
+                  </div>
                 </div>
                 <div className="flex-1 p-4 flex flex-col justify-between">
                   <div>
@@ -275,16 +305,11 @@ export function OutfitGeneratorScreen() {
                       </p>
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void visualizeOutfit(outfit.raw, i);
-                        }}
-                        disabled={tryOnLoading === i || !photoDataUrl}
-                        className="text-xs px-2 py-1 rounded-full flex items-center gap-1"
-                        style={{ background: "var(--secondary)", color: "var(--foreground)", fontFamily: "var(--font-body)" }}
+                        onClick={(e) => { e.stopPropagation(); setSelectedOutfit(outfit); }}
+                        className="text-xs"
+                        style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}
                       >
-                        <ImageIcon size={10} />
-                        {tryOnLoading === i ? "…" : "Try on"}
+                        Details
                       </button>
                       <div
                         className="text-xs px-2 py-0.5 rounded-full"
@@ -297,9 +322,51 @@ export function OutfitGeneratorScreen() {
                 </div>
               </div>
             </motion.div>
-          ))}
+          );})}
         </div>
+
+        {outfits.length > 0 && (
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={() => void visualizeSelectedOutfits()}
+              disabled={
+                comparisonLoading ||
+                selectedOutfitIndices.length === 0 ||
+                !hasPhoto
+              }
+              className="w-full py-3.5 rounded-2xl flex items-center justify-center gap-2"
+              style={{
+                background: comparisonLoading || selectedOutfitIndices.length === 0 || !hasPhoto
+                  ? "var(--muted)"
+                  : "linear-gradient(135deg, var(--accent) 0%, #7e5fbf 100%)",
+                color: comparisonLoading || selectedOutfitIndices.length === 0 || !hasPhoto
+                  ? "var(--muted-foreground)"
+                  : "white",
+                fontFamily: "var(--font-body)",
+                fontWeight: 700,
+              }}
+            >
+              <ImageIcon size={16} />
+              {comparisonLoading
+                ? "Creating comparison…"
+                : selectedOutfitIndices.length === 0
+                  ? "Select outfits to visualize"
+                  : !hasPhoto
+                    ? "Add a profile photo to visualize"
+                    : `Visualize ${selectedOutfitIndices.length} outfit${selectedOutfitIndices.length > 1 ? "s" : ""}`}
+            </button>
+          </div>
+        )}
       </div>
+
+      <OutfitComparisonSheet
+        open={Boolean(comparisonImage)}
+        imageUrl={comparisonImage}
+        labels={comparisonLabels}
+        note={comparisonNote}
+        onClose={clearComparison}
+      />
 
       {/* Outfit Detail Sheet */}
       <AnimatePresence>
