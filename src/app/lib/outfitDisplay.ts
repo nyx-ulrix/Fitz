@@ -1,6 +1,16 @@
 import type { Outfit } from "./types";
 import { fitScoreFromLabels } from "./types";
 
+function garmentSortOrder(item: { category?: string; name: string }) {
+  const category = (item.category ?? "").toLowerCase();
+  if (category === "top" || category === "tops") return 0;
+  if (category === "dress" || category === "dresses") return 1;
+  if (category === "outerwear") return 2;
+  if (category === "bottom" || category === "bottoms") return 3;
+  if (category === "shoes" || category === "shoe") return 4;
+  return 5;
+}
+
 export type DisplayGarment = {
   name: string;
   img: string;
@@ -25,8 +35,12 @@ export function outfitToDisplay(
   index: number,
   tryOnImage?: string,
 ): DisplayOutfit {
-  const owned = outfit.ownedItems ?? [];
-  const shop = outfit.shopItems ?? [];
+  const owned = [...(outfit.ownedItems ?? [])].sort(
+    (a, b) => garmentSortOrder(a) - garmentSortOrder(b),
+  );
+  const shop = [...(outfit.shopItems ?? [])].sort(
+    (a, b) => garmentSortOrder(a) - garmentSortOrder(b),
+  );
   const garmentItems: DisplayGarment[] = [
     ...owned.map((item) => ({
       name: item.name,

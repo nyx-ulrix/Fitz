@@ -71,7 +71,7 @@ export function mapKvItemToCatalogItem(
     name: asString(raw.name) || "Wardrobe item",
     category,
     color,
-    style: category ? [category] : [],
+    style: [],
     weather: asString(raw.season) ? [asString(raw.season)] : [],
     formality: null,
     image_url: imageUrl,

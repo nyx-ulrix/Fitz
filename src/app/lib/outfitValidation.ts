@@ -3,6 +3,13 @@ import type { Outfit, OutfitItem } from "./types";
 type GarmentKind = "top" | "outerwear" | "bottom" | "dress" | "shoes" | "other";
 
 function garmentKind(item: OutfitItem): GarmentKind {
+  const category = (item.category ?? "").toLowerCase().trim();
+  if (category === "top" || category === "tops") return "top";
+  if (category === "bottom" || category === "bottoms") return "bottom";
+  if (category === "dress" || category === "dresses") return "dress";
+  if (category === "outerwear") return "outerwear";
+  if (category === "shoes" || category === "shoe") return "shoes";
+
   const description = `${item.category ?? ""} ${item.name}`.toLowerCase();
 
   if (/(dress)/.test(description)) {

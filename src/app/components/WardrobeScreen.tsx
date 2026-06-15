@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Plus, Search, Check, ChevronDown, ChevronUp, RefreshCw, GripVertical } from "lucide-react";
+import { Plus, Search, ChevronDown, ChevronUp, RefreshCw, GripVertical } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { AddItemScreen } from "./AddItemScreen";
+import { EditItemScreen, type EditableWardrobeItem } from "./EditItemScreen";
 import { useAuth } from "../lib/AuthContext";
 import { api } from "../lib/api";
 import { classifyGarment } from "../lib/fitzApi";
@@ -18,17 +19,7 @@ const CATEGORY_META = [
 
 const DRAG_THRESHOLD_PX = 10;
 
-interface WardrobeItem {
-  id: string;
-  name: string;
-  brand: string;
-  category: string;
-  colour: string;
-  season: string;
-  price: number;
-  worn: number;
-  img?: string;
-}
+interface WardrobeItem extends EditableWardrobeItem {}
 
 function normalizeCategory(category: string) {
   return category?.toLowerCase().trim() ?? "tops";
@@ -39,8 +30,8 @@ export function WardrobeScreen() {
   const [items, setItems]                 = useState<WardrobeItem[]>([]);
   const [loading, setLoading]             = useState(true);
   const [showAddScreen, setShowAddScreen] = useState(false);
+  const [editingItem, setEditingItem] = useState<WardrobeItem | null>(null);
   const [searchQuery, setSearchQuery]     = useState("");
-  const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [collapsed, setCollapsed]         = useState<string[]>([]);
   const [draggingId, setDraggingId]       = useState<string | null>(null);
   const [dropTargetId, setDropTargetId]   = useState<string | null>(null);
@@ -55,7 +46,7 @@ export function WardrobeScreen() {
     try {
       const { items: data } = await api.getWardrobe(token);
       setItems(
-        (data ?? []).map((item: WardrobeItem & { colour?: string; image_url?: string; imageUrl?: string }) => ({
+        (data ?? []).map((item: WardrobeItem & { colour?: string; image_url?: string; imageUrl?: string; notes?: string }) => ({
           id: item.id,
           name: item.name,
           brand: item.brand ?? "Wardrobe",
@@ -64,6 +55,7 @@ export function WardrobeScreen() {
           season: item.season ?? "",
           price: item.price ?? 0,
           worn: item.worn ?? 0,
+          notes: item.notes ?? "",
           img: item.img ?? item.image_url ?? item.imageUrl,
         })),
       );
@@ -149,9 +141,8 @@ export function WardrobeScreen() {
     if (hasDraggedRef.current && targetCategory && itemId) {
       await moveItemToCategory(itemId, targetCategory);
     } else if (!hasDraggedRef.current && itemId) {
-      setSelectedItems((p) =>
-        p.includes(itemId) ? p.filter((i) => i !== itemId) : [...p, itemId],
-      );
+      const item = items.find((i) => i.id === itemId);
+      if (item) setEditingItem(item);
     }
 
     pendingDrag.current = null;
@@ -159,7 +150,7 @@ export function WardrobeScreen() {
     setDraggingId(null);
     setDropTargetId(null);
     setPointerActive(false);
-  }, [moveItemToCategory]);
+  }, [moveItemToCategory, items]);
 
   useEffect(() => {
     if (!pointerActive) return;
@@ -242,7 +233,7 @@ export function WardrobeScreen() {
       <div className="px-5 pt-6 pb-4">
         <h1 style={{ fontFamily: "var(--font-display)", fontSize: "1.75rem", fontWeight: 700, color: "var(--foreground)" }}>My Wardrobe</h1>
         <p className="text-sm mt-0.5" style={{ color: "var(--muted-foreground)", fontFamily: "var(--font-body)" }}>
-          {items.length} items{totalValue > 0 ? ` · £${totalValue.toLocaleString()} value` : ""} · drag items to recategorize
+          {items.length} items{totalValue > 0 ? ` · £${totalValue.toLocaleString()} value` : ""} · tap to edit, drag to move
         </p>
         {tagNotice && (
           <p className="text-xs mt-2 px-3 py-2 rounded-xl" style={{ background: "var(--secondary)", color: "var(--foreground)", fontFamily: "var(--font-body)" }}>
@@ -349,7 +340,6 @@ export function WardrobeScreen() {
                             Drop item here
                           </div>
                         ) : cat.items.map(item => {
-                          const isSelected = selectedItems.includes(item.id);
                           const isDragging = draggingId === item.id;
                           const isMoving = movingId === item.id;
                           return (
@@ -359,9 +349,7 @@ export function WardrobeScreen() {
                               className="rounded-2xl overflow-hidden relative touch-none"
                               style={{
                                 background: "var(--background)",
-                                border: "1.5px solid",
-                                borderColor: isSelected ? "var(--accent)" : "var(--border)",
-                                boxShadow: isSelected ? "0 4px 12px rgba(169,139,227,0.3)" : "none",
+                                border: "1.5px solid var(--border)",
                                 opacity: isDragging ? 0.45 : isMoving ? 0.6 : 1,
                                 transform: isDragging ? "scale(0.96)" : undefined,
                                 cursor: draggingId ? "grabbing" : "grab",
@@ -374,11 +362,6 @@ export function WardrobeScreen() {
                               >
                                 <GripVertical size={10} style={{ color: "var(--muted-foreground)" }} />
                               </div>
-                              {isSelected && (
-                                <div className="absolute top-1.5 right-1.5 z-10 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: "var(--accent)" }}>
-                                  <Check size={10} color="white" />
-                                </div>
-                              )}
                               <div style={{ height: 100, background: "var(--muted)" }}>
                                 {item.img
                                   ? <img src={item.img} alt={item.name} className="w-full h-full object-cover pointer-events-none" draggable={false} />
@@ -415,6 +398,25 @@ export function WardrobeScreen() {
         </button>
       </div>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+
+      <AnimatePresence>
+        {editingItem && (
+          <EditItemScreen
+            item={editingItem}
+            onClose={() => setEditingItem(null)}
+            onUpdated={(updated) => {
+              setItems((prev) =>
+                prev.map((entry) => (entry.id === updated.id ? updated : entry)),
+              );
+              setEditingItem(updated);
+            }}
+            onDeleted={(id) => {
+              setItems((prev) => prev.filter((entry) => entry.id !== id));
+              setEditingItem(null);
+            }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
